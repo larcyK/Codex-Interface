@@ -38,6 +38,22 @@ export default function App() {
   const [promptInput, setPromptInput] = useState("Say hello to Codex");
   const [streamOutput, setStreamOutput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
+  const [streamHistory, setStreamHistory] = useState<Array<{
+    streamId: string;
+    model: string;
+    prompt: string;
+    output: string;
+    deviceId: string;
+    createdAt: string;
+  }>>([]);
+  const [selectedStream, setSelectedStream] = useState<{
+    streamId: string;
+    model: string;
+    prompt: string;
+    output: string;
+    deviceId: string;
+    createdAt: string;
+  } | null>(null);
   const wsRef = useMemo(() => ({ ws: null as WebSocket | null }), []);
 
   const refreshAccessToken = async (
@@ -214,6 +230,20 @@ export default function App() {
   const fetchLogs = async () => {
     const res = await api.get("/logs?limit=20");
     setLogs(res.items ?? []);
+  };
+
+  const fetchStreamHistory = async () => {
+    const res = await api.get("/codex/history?limit=50", true);
+    if (res?.items) {
+      setStreamHistory(res.items);
+    }
+  };
+
+  const loadStreamDetail = async (streamId: string) => {
+    const res = await api.get(`/codex/history/${streamId}`, true);
+    if (res && !res.error) {
+      setSelectedStream(res);
+    }
   };
 
   const startCodexStream = async () => {
@@ -428,6 +458,39 @@ export default function App() {
           <button onClick={cancelCodexStream} disabled={!isStreaming}>Cancel</button>
         </div>
         <pre className="mono" style={{ whiteSpace: "pre-wrap", maxHeight: 300, overflow: "auto" }}>{streamOutput}</pre>
+      </section>
+
+      <section className="card">
+        <h2>Codex ストリーム履歴</h2>
+        <div className="row">
+          <button onClick={fetchStreamHistory}>履歴を取得</button>
+          <button onClick={() => setSelectedStream(null)}>クリア</button>
+        </div>
+        {streamHistory.length > 0 && (
+          <div>
+            <h3>過去のストリーム</h3>
+            <ul>
+              {streamHistory.map((s) => (
+                <li key={s.streamId}>
+                  <strong>{s.model}</strong> {new Date(s.createdAt).toLocaleString()}{" "}
+                  <button onClick={() => loadStreamDetail(s.streamId)}>詳細</button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {selectedStream && (
+          <div className="card" style={{ marginTop: 16, backgroundColor: "#f5f5f5" }}>
+            <h3>ストリーム詳細</h3>
+            <p><strong>Model:</strong> {selectedStream.model}</p>
+            <p><strong>Device:</strong> {selectedStream.deviceId}</p>
+            <p><strong>Created:</strong> {new Date(selectedStream.createdAt).toLocaleString()}</p>
+            <p><strong>Prompt:</strong></p>
+            <pre className="mono" style={{ whiteSpace: "pre-wrap", maxHeight: 150, overflow: "auto" }}>{selectedStream.prompt}</pre>
+            <p><strong>Output:</strong></p>
+            <pre className="mono" style={{ whiteSpace: "pre-wrap", maxHeight: 200, overflow: "auto" }}>{selectedStream.output}</pre>
+          </div>
+        )}
       </section>
     </main>
   );
