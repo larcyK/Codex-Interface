@@ -43,21 +43,11 @@ npm run dev:mobile
 ```
 
 ## 動作確認
-1. PCブラウザなら `http://localhost:5173` を開く
-2. スマホから開く場合は、PCのLAN IPで `http://<PCのLAN IP>:5173` を開く
-3. API Hostを `http://<PCのLAN IP>:8000` に設定
-4. PINに `123456` を入力してログイン
-5. セッション開始 -> コマンド実行
+1. PCブラウザなら `http://localhost:5173`、スマホなら `http://<PCのLAN IP>:5173` を開く
+2. PINに `123456` を入力してログイン
+3. セッション開始 -> コマンド実行
 
-### スマホ接続の補足
-- `localhost` はスマホ自身を指すため、PCのGatewayには接続できない
-- macOSでLAN IPを確認する例:
-
-```bash
-ifconfig
-```
-
-- `en0` や `en1` の `inet`（例: `192.168.x.x`）を利用する
+**注**: API HostとWS URLはブラウザのホストから自動推定されるため、手動設定は不要です。
 
 ## ビルド
 ```bash

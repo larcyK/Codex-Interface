@@ -10,8 +10,16 @@ type LogItem = {
 const API_PREFIX = "/api/v1";
 
 export default function App() {
-  const [host, setHost] = useState("http://localhost:8000");
-  const [wsHost, setWsHost] = useState("ws://localhost:8001/ws");
+  const [host, setHost] = useState(() => {
+    const hostname = typeof window !== "undefined" ? window.location.hostname : "localhost";
+    const protocol = typeof window !== "undefined" && window.location.protocol === "https:" ? "https:" : "http:";
+    return `${protocol}//${hostname}:8000`;
+  });
+  const [wsHost, setWsHost] = useState(() => {
+    const hostname = typeof window !== "undefined" ? window.location.hostname : "localhost";
+    const protocol = typeof window !== "undefined" && window.location.protocol === "https:" ? "wss:" : "ws:";
+    return `${protocol}//${hostname}:8001/ws`;
+  });
   const [deviceName, setDeviceName] = useState("mobile-pwa");
   const [pin, setPin] = useState("123456");
   const [token, setToken] = useState("");
