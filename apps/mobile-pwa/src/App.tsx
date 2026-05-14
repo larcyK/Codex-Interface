@@ -227,8 +227,9 @@ export default function App() {
     }
 
     // replace placeholder token in wsUrl if present
-    const tokenParam = token ? `token=${encodeURIComponent(token)}` : "";
-    const wsUrl = res.wsUrl.replace("<token>", encodeURIComponent(token));
+    // Prefer token persisted in storage (may have been refreshed during API call)
+    const stored = getTokens().accessToken || token;
+    const wsUrl = res.wsUrl.replace("<token>", encodeURIComponent(stored || ""));
     try {
       const ws = new WebSocket(wsUrl);
       wsRef.ws = ws;
@@ -253,12 +254,13 @@ export default function App() {
         }
       };
       ws.onerror = (e) => {
-        setStreamOutput((s) => s + `\n[ws error]\n`);
+        setStreamOutput((s) => s + `\n[ws error] ${String((e as any)?.message ?? e)}\n`);
         setIsStreaming(false);
       };
-      ws.onclose = () => {
+      ws.onclose = (ev) => {
         setIsStreaming(false);
         wsRef.ws = null;
+        setStreamOutput((s) => s + `\n[ws closed] code=${ev.code} reason=${ev.reason}\n`);
       };
     } catch (e) {
       setStreamOutput((s) => s + `\n[connect failed] ${String(e)}\n`);
