@@ -231,6 +231,7 @@ export default function App() {
     const stored = getTokens().accessToken || token;
     const wsUrl = res.wsUrl.replace("<token>", encodeURIComponent(stored || ""));
     try {
+      setStreamOutput((s) => s + `\n[connecting to] ${wsUrl}\n[online] ${typeof navigator !== 'undefined' ? navigator.onLine : 'unknown'}\n[location] ${typeof window !== 'undefined' ? window.location.href : 'unknown'}\n`);
       const ws = new WebSocket(wsUrl);
       wsRef.ws = ws;
       ws.onopen = () => {
