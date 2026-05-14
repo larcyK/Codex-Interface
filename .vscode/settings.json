@@ -1,0 +1,24 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "/^git add apps/mobile-pwa/src/App\\.tsx && git commit -m \"pwa: implement proactive token auto-refresh \\(60s before expiry\\)\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^npm --workspace apps/gateway install$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^npm --workspace apps/gateway run build$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^git add apps/mobile-pwa/src/App\\.tsx && git commit -m \"pwa: show verbose WS events with timestamp; add clear button\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^git add apps/mobile-pwa/src/App\\.js apps/mobile-pwa/src/useAutoReconnect\\.js apps/mobile-pwa/tsconfig\\.tsbuildinfo && git commit -m \"chore\\(pwa\\): add build artifacts \\(App\\.js, useAutoReconnect\\.js, tsconfig info\\)\" \\|\\| true\n\ngit add package-lock\\.json && git commit -m \"chore: update package-lock\\.json\" \\|\\| true\n\ngit add \\.vscode/settings\\.json && git commit -m \"chore: add VSCode workspace settings\" \\|\\| true\n\ngit status --porcelain --untracked-files=all\n$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}
