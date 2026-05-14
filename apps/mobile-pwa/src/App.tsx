@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useAutoReconnect } from "./useAutoReconnect";
 
 type LogItem = {
   id: string;
@@ -109,18 +110,10 @@ export default function App() {
     setLogs(res.items ?? []);
   };
 
-  const connectWs = () => {
-    if (!token) {
-      setCommandResult("先に認証してください");
-      return;
-    }
-    const ws = new WebSocket(`${wsHost}?token=${encodeURIComponent(token)}`);
-    ws.onmessage = (event) => {
-      setEvents((prev) => [event.data, ...prev].slice(0, 20));
-    };
-    ws.onopen = () => setCommandResult("WebSocket接続完了");
-    ws.onerror = () => setCommandResult("WebSocket接続エラー");
-  };
+  // Auto-reconnect WS when token changes
+  const wsConnected = useAutoReconnect(wsHost, token, (eventData) => {
+    setEvents((prev) => [eventData, ...prev].slice(0, 20));
+  });
 
   return (
     <main className="app">
@@ -150,8 +143,8 @@ export default function App() {
           <input value={pin} onChange={(e) => setPin(e.target.value)} type="password" />
         </label>
         <button onClick={login}>PINログイン</button>
-        <button onClick={connectWs}>WS接続</button>
         <p className="mono">Token: {token ? `${token.slice(0, 24)}...` : "未取得"}</p>
+        <p className="mono">WS: {wsConnected ? "✓接続中" : "✗切断"}</p>
       </section>
 
       <section className="card">

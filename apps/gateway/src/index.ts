@@ -13,10 +13,19 @@ import {
   verifyPin,
 } from "./auth.js";
 import { JsonStore } from "./store.js";
+import { SqliteStore } from "./store-sqlite.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const store = new JsonStore(join(__dirname, "../data/store.json"));
+
+const useDb = process.env.USE_DB === "sqlite";
+const storePath = useDb
+  ? join(__dirname, "../data/codex.db")
+  : join(__dirname, "../data/store.json");
+
+const store = useDb
+  ? (new SqliteStore(storePath) as any)
+  : new JsonStore(storePath);
 
 const httpPort = Number(process.env.HTTP_PORT ?? 8000);
 const wsPort = Number(process.env.WS_PORT ?? 8001);

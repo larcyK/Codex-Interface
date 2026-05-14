@@ -53,3 +53,38 @@ npm run dev:mobile
 ```bash
 npm run build
 ```
+
+## テスト
+Gateway統合テストを実行:
+```bash
+npm --workspace apps/gateway run test:run
+```
+
+テスト内容:
+- Health API
+- PIN認証（正常系・異常系）
+- セッション管理
+- コマンド実行
+- ログAPI
+
+## LAN実機検証手順
+1. PC側で起動:
+   ```bash
+   npm run dev:gateway
+   npm run dev:mobile
+   ```
+
+2. PCの LAN IP を確認:
+   ```bash
+   ifconfig
+   ```
+   （`en0` 等の `inet` アドレスを記録, 例: `192.168.1.10`）
+
+3. スマホで `http://<LAN IP>:5173` にアクセス
+
+4. 検証項目（`context/lan-test-plan.md` 参照）:
+   - mDNS/手動IP接続
+   - PIN認証
+   - コマンド実行とストリーム表示
+   - ログ取得とページネーション
+   - Wi-Fi 切断/再接続での再接続
