@@ -1,0 +1,6 @@
+node_modules/
+dist/
+*.log
+apps/gateway/data/store.json
+
+**/.DS_Store

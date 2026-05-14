@@ -1,0 +1,9 @@
+{
+  "name": "Codex Interface Mobile",
+  "short_name": "CodexIF",
+  "display": "standalone",
+  "start_url": "/",
+  "background_color": "#f8fafc",
+  "theme_color": "#0f172a",
+  "icons": []
+}

@@ -1,0 +1,51 @@
+{
+  "project": "Codex Interface",
+  "created": "2026-05-14",
+  "purpose": "LAN上のPCで動くCodexをスマホで操作・閲覧するアプリのMVP",
+  "scope": {
+    "network": "local-lan",
+    "pc_os": ["macOS", "Linux", "Windows"],
+    "mobile": ["iOS", "Android"]
+  },
+  "mvp_features": [
+    "mDNS/手動IPによるサービス検出",
+    "認証(PIN/JWT)",
+    "WebSocketによるリアルタイム双方向通信",
+    "コマンド実行・停止・ログ閲覧",
+    "軽量永続化(SQLite/JSON)"
+  ],
+  "network": {
+    "default_ports": {"http": 8000, "ws": 8001},
+    "discovery": ["mDNS", "manual"]
+  },
+  "security": {
+    "auth": "local PIN + short-lived JWT",
+    "tls": "self-signed allowed for LAN MVP"
+  },
+  "tech_selection": {
+    "backend": "Node.js 22 + TypeScript + Fastify + ws",
+    "frontend": "PWA (React + Vite)",
+    "storage": "SQLite",
+    "discovery": "mDNS + manual fallback"
+  },
+  "next_steps": [
+    "実装雛形の作成（Gateway + PWA）",
+    "LAN実機テストの実施",
+    "証明書/PIN初期化フローの実装",
+    "MVP受け入れ基準の検証"
+  ],
+  "design_documents": [
+    "context/context.md",
+    "context/architecture.md",
+    "context/api-spec.md",
+    "context/security-design.md",
+    "context/data-model.md",
+    "context/mobile-ui-flow.md",
+    "context/mvp-roadmap.md",
+    "context/tech-selection.md",
+    "context/lan-test-plan.md",
+    "context/deployment-network.md",
+    "context/extension-roadmap.md",
+    "README.md"
+  ]
+}

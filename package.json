@@ -1,0 +1,15 @@
+{
+  "name": "codex-interface",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/gateway",
+    "apps/mobile-pwa"
+  ],
+  "scripts": {
+    "dev:gateway": "npm --workspace apps/gateway run dev",
+    "dev:mobile": "npm --workspace apps/mobile-pwa run dev",
+    "build": "npm --workspace apps/gateway run build && npm --workspace apps/mobile-pwa run build",
+    "test": "npm --workspace apps/gateway run test"
+  }
+}
