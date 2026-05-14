@@ -20,7 +20,19 @@ async function startServer() {
       stdio: ["ignore", "ignore", "ignore"],
     });
     serverProcess.on("error", reject);
-    setTimeout(() => resolve(null), 1000); // Wait for startup
+    // Wait until health endpoint responds or timeout
+    const start = Date.now();
+    const check = async () => {
+      try {
+        const res = await fetch(`${API_URL}/health`);
+        if (res.ok) return resolve(null);
+      } catch (e) {
+        // ignore
+      }
+      if (Date.now() - start > 5000) return reject(new Error("server did not start in time"));
+      setTimeout(check, 200);
+    };
+    setTimeout(check, 200);
   });
 }
 

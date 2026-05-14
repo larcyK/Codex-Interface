@@ -276,6 +276,35 @@ const start = async () => {
     await app.listen({ host, port: httpPort });
     app.log.info(`gateway listening on http://${host}:${httpPort}`);
     app.log.info(`ws listening on ws://${host}:${wsPort}/ws`);
+    // Try to advertise via mDNS (bonjour) for LAN discovery. Optional dependency.
+    try {
+      const bonjourModule = await import("bonjour");
+      const bonjour = bonjourModule.default ?? bonjourModule;
+      const service = bonjour.publish({
+        name: serverName,
+        type: "codexif",
+        protocol: "tcp",
+        port: httpPort,
+        txt: { wsPort: String(wsPort), features: "exec,logs,ws" },
+      });
+      app.log.info(`mDNS: advertised service ${serverName} (_codexif._tcp)`);
+      // Unpublish on exit
+      const cleanup = () => {
+        try {
+          service.stop();
+          bonjour.destroy();
+        } catch (e) {
+          /* ignore */
+        }
+      };
+      process.on("exit", cleanup);
+      process.on("SIGINT", () => {
+        cleanup();
+        process.exit(0);
+      });
+    } catch (e) {
+      app.log.warn("mDNS advertise not available (bonjour not installed)");
+    }
   } catch (error) {
     app.log.error(error);
     process.exit(1);
