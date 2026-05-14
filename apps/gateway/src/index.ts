@@ -416,7 +416,13 @@ app.post("/api/v1/codex/stream", async (req, reply) => {
   pendingStreams.set(streamId, { req: parsed.data, createdAt: Date.now() });
   store.addLog({ level: "info", category: "codex", message: `stream started`, requestId: streamId });
 
-  return { streamId, wsUrl: `ws://localhost:${wsPort}/ws/codex?streamId=${streamId}&token=<token>` };
+  // Build a wsUrl using the request host so clients (on other devices) get a reachable address
+  const hostHeader = String((req.headers as any).host ?? `localhost:${httpPort}`);
+  const hostname = hostHeader.split(":")[0];
+  const proto = ((req.headers as any)["x-forwarded-proto"] === "https") ? "wss" : "ws";
+  const wsUrl = `${proto}://${hostname}:${wsPort}/ws/codex?streamId=${streamId}&token=<token>`;
+
+  return { streamId, wsUrl };
 });
 
 const start = async () => {
