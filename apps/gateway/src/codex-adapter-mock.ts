@@ -1,19 +1,7 @@
 import EventEmitter from "events";
+import type { CodexAdapter, ExecutionRequest } from "./codex-adapter.js";
 
-export type ExecutionRequest = {
-  model: string;
-  prompt: string;
-  maxTokens?: number;
-  temperature?: number;
-  metadata?: Record<string, unknown>;
-};
-
-export type StreamChunk = {
-  seq: number;
-  text: string;
-};
-
-class MockCodexAdapter {
+class MockCodexAdapter implements CodexAdapter {
   // Synchronous-like execution (returns full output)
   async executeSync(req: ExecutionRequest): Promise<{ id: string; output: string }> {
     const id = `mock-${Date.now()}`;

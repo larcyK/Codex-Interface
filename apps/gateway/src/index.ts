@@ -12,7 +12,7 @@ import {
   verifyAccessToken,
   verifyPin,
 } from "./auth.js";
-import mockCodex from "./codex-adapter-mock.js";
+import { getCodexAdapter, getCodexBackendName } from "./codex-adapter.js";
 import { JsonStore } from "./store.js";
 import { SqliteStore } from "./store-sqlite.js";
 
@@ -35,6 +35,8 @@ const serverName = process.env.SERVER_NAME ?? "codex-host.local";
 
 const app = Fastify({ logger: true });
 await app.register(cors, { origin: true });
+const codexAdapter = getCodexAdapter();
+const codexBackend = getCodexBackendName();
 
 const wsClients = new Set<WebSocket>();
 
@@ -321,7 +323,7 @@ wss.on("connection", async (socket: WebSocket, req: IncomingMessage) => {
       app.log.warn({ streamId }, "Failed to extract deviceId from token");
     }
 
-    const ee = mockCodex.stream(pending.req);
+    const ee = codexAdapter.stream(pending.req);
     pending.socket = socket; // track socket for cleanup
 
     // Buffer chunks to collect complete output
@@ -434,9 +436,15 @@ app.post("/api/v1/codex/execute", async (req, reply) => {
   }
 
   const { model, prompt } = parsed.data;
-  const res = await mockCodex.executeSync(parsed.data as any);
-  store.addLog({ level: "info", category: "codex", message: `execute ${model}`, requestId: res.id });
-  return { id: res.id, output: res.output };
+  try {
+    const res = await codexAdapter.executeSync(parsed.data as any);
+    store.addLog({ level: "info", category: "codex", message: `execute ${model}`, requestId: res.id });
+    return { id: res.id, output: res.output };
+  } catch (e: any) {
+    const message = e?.message ?? "codex execute failed";
+    store.addLog({ level: "error", category: "codex", message });
+    return reply.code(502).send({ error: { code: "CODEX_EXEC_FAILED", message } });
+  }
 });
 
 // Codex stream (start)
@@ -516,6 +524,7 @@ const start = async () => {
     await app.listen({ host, port: httpPort });
     app.log.info(`gateway listening on http://${host}:${httpPort}`);
     app.log.info(`ws listening on ws://${host}:${wsPort}/ws`);
+    app.log.info({ codexBackend }, "codex adapter backend selected");
     // Try to advertise via mDNS (bonjour) for LAN discovery. Optional dependency.
     try {
       const bonjourModule = await import("bonjour");

@@ -60,6 +60,35 @@ Gateway統合テストを実行:
 npm --workspace apps/gateway run test:run
 ```
 
+## 本番Codexアダプタ（CLI連携）
+Gatewayは `mock` と `cli` の2種類のCodexアダプタを切り替えられます。
+
+- デフォルト: `mock`
+- 本番連携: `CODEX_BACKEND=cli`
+
+利用可能な環境変数:
+- `CODEX_BACKEND`: `mock` または `cli`
+- `CODEX_CLI_COMMAND`: 実行するCLIコマンド名（既定: `codex`）
+- `CODEX_CLI_ARGS`: CLI引数（JSON配列または空白区切り文字列）
+- `CODEX_CLI_PROMPT_MODE`: `stdin`（既定）または `arg`
+- `CODEX_CLI_TIMEOUT_MS`: タイムアウトms（既定: `120000`）
+
+例: Codex CLI を `stdin` 入力で使う
+```bash
+CODEX_BACKEND=cli \
+CODEX_CLI_COMMAND=codex \
+CODEX_CLI_ARGS='["chat"]' \
+npm run dev:gateway
+```
+
+例: プロンプトを引数で渡す
+```bash
+CODEX_BACKEND=cli \
+CODEX_CLI_COMMAND=codex \
+CODEX_CLI_PROMPT_MODE=arg \
+npm run dev:gateway
+```
+
 テスト内容:
 - Health API
 - PIN認証（正常系・異常系）
