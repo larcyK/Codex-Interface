@@ -109,8 +109,28 @@ app.post("/api/v1/auth/refresh", async (req, reply) => {
     deviceName: "mobile-client",
     scope: "exec",
   });
+  // rotate refresh token: issue a new one and store it
+  const newRefresh = issueRefreshToken();
+  store.setRefreshToken(deviceId, newRefresh);
+  store.addLog({ level: "info", category: "auth", message: `refresh rotated for ${deviceId}` });
 
-  return { accessToken, expiresIn: 900 };
+  return { accessToken, expiresIn: 900, refreshToken: newRefresh };
+});
+
+app.post("/api/v1/auth/revoke", async (req, reply) => {
+  const parsed = refreshSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return reply.code(400).send({ error: { code: "INVALID_REQUEST", message: "Invalid payload" } });
+  }
+  const { deviceId, refreshToken } = parsed.data;
+  const current = store.getRefreshToken(deviceId);
+  if (!current || current !== refreshToken) {
+    return reply.code(401).send({ error: { code: "UNAUTHORIZED", message: "Refresh token is invalid" } });
+  }
+  // revoke
+  store.setRefreshToken(deviceId, "");
+  store.addLog({ level: "info", category: "auth", message: `refresh token revoked for ${deviceId}` });
+  return { revoked: true };
 });
 
 app.get("/api/v1/server/info", async () => {

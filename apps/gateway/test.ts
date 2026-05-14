@@ -86,7 +86,7 @@ test("Authentication Flow", async (t) => {
     const refreshToken = authData.refreshToken;
     const deviceId = authData.deviceId || "test-device";
 
-    // Use refresh token to get new access token
+    // Use refresh token to get new access token + rotated refresh token
     const refreshRes = await fetch(`${API_URL}/auth/refresh`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -96,6 +96,36 @@ test("Authentication Flow", async (t) => {
     const refreshData = (await refreshRes.json()) as Record<string, string>;
     assert(refreshData.accessToken);
     assert(refreshData.accessToken !== authData.accessToken);
+    assert(refreshData.refreshToken);
+    assert(refreshData.refreshToken !== refreshToken);
+  });
+
+  await t.test("POST /auth/revoke invalidates refresh token", async () => {
+    const authRes = await fetch(`${API_URL}/auth/pin`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pin: "123456", deviceName: "revoke-test" }),
+    });
+    const authData = (await authRes.json()) as Record<string, string>;
+    const refreshToken = authData.refreshToken;
+    const deviceId = authData.deviceId || "revoke-device";
+
+    const revokeRes = await fetch(`${API_URL}/auth/revoke`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refreshToken, deviceId }),
+    });
+    assert.equal(revokeRes.status, 200);
+    const revokeData = (await revokeRes.json()) as Record<string, unknown>;
+    assert.equal(revokeData.revoked, true);
+
+    // Subsequent refresh should fail
+    const refreshRes2 = await fetch(`${API_URL}/auth/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refreshToken, deviceId }),
+    });
+    assert.equal(refreshRes2.status, 401);
   });
 });
 
