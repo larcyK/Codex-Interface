@@ -262,13 +262,15 @@ app.get("/api/v1/logs", async (req) => {
   return { items: res.items, nextCursor: res.nextCursor };
 });
 
-const wss = new WebSocketServer({ port: wsPort, path: "/ws" });
+const wss = new WebSocketServer({ port: wsPort, path: "/" }); // Listen on all paths, use url.pathname to route
 // map of pending stream requests created by /api/v1/codex/stream
 const pendingStreams = new Map<string, { req: any; createdAt: number }>();
 wss.on("connection", async (socket: WebSocket, req: IncomingMessage) => {
   const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
   const token = url.searchParams.get("token");
   const pathname = url.pathname;
+  const remote = (req.socket && (req.socket as any).remoteAddress) || "unknown";
+  app.log.info({ remote, pathname, tokenPresent: Boolean(token) }, `ws connection attempt`);
 
   if (!token) {
     socket.close(1008, "missing token");
@@ -279,12 +281,13 @@ wss.on("connection", async (socket: WebSocket, req: IncomingMessage) => {
   try {
     await verifyAccessToken(token);
   } catch {
+    app.log.warn({ remote, token: token ? "present" : "missing" }, "ws token invalid or missing");
     socket.close(1008, "invalid token");
     return;
   }
 
   // Handle regular server event WS
-  if (pathname === "/ws") {
+  if (pathname === "/ws" || pathname === "") {
     wsClients.add(socket);
     socket.send(
       JSON.stringify({
@@ -302,12 +305,16 @@ wss.on("connection", async (socket: WebSocket, req: IncomingMessage) => {
   // Handle Codex streaming WS on /ws/codex
   if (pathname === "/ws/codex") {
     const streamId = url.searchParams.get("streamId");
+    app.log.info({ remote, streamId }, `ws/codex connection`);
     if (!streamId) {
       socket.close(1008, "missing streamId");
       return;
     }
 
     const pending = pendingStreams.get(streamId);
+    if (!pending) {
+      app.log.warn({ remote, streamId }, "ws/codex unknown streamId");
+    }
     if (!pending) {
       socket.close(1008, "unknown streamId");
       return;
