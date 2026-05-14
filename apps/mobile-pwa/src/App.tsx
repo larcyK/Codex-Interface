@@ -33,6 +33,7 @@ export default function App() {
   const [commandResult, setCommandResult] = useState("");
   const [logs, setLogs] = useState<LogItem[]>([]);
   const [events, setEvents] = useState<string[]>([]);
+  const [discovered, setDiscovered] = useState<Array<{ name: string; ip: string; wsUrl?: string }>>([]);
 
   const refreshAccessToken = async (
     currentToken: string,
@@ -210,6 +211,32 @@ export default function App() {
     setLogs(res.items ?? []);
   };
 
+  // Try simple LAN discovery by attempting common .local and hostnames.
+  const discoverLan = async () => {
+    const candidates = [
+      // advertised default
+      "codex-host.local",
+      // try local hostname
+      typeof window !== "undefined" ? `${window.location.hostname}` : "",
+    ].filter(Boolean) as string[];
+
+    const results: Array<{ name: string; ip: string; wsUrl?: string }> = [];
+    await Promise.all(
+      candidates.map(async (c) => {
+        const url = `http://${c}:8000/api/v1/server/info`;
+        try {
+          const r = await fetch(url, { mode: "cors" });
+          if (!r.ok) return;
+          const data = await r.json();
+          results.push({ name: data.name ?? c, ip: data.ip ?? c, wsUrl: data.wsUrl });
+        } catch (e) {
+          // ignore unreachable
+        }
+      }),
+    );
+    setDiscovered(results);
+  };
+
   // Auto-reconnect WS when token changes
   const handleWsEvent = useCallback((eventData: string | unknown) => {
     const now = new Date().toISOString();
@@ -234,6 +261,26 @@ export default function App() {
           WS URL
           <input value={wsHost} onChange={(e) => setWsHost(e.target.value)} />
         </label>
+        <div className="row">
+          <button onClick={discoverLan}>LAN上を発見</button>
+        </div>
+        {discovered.length > 0 && (
+          <div>
+            <h3>発見されたサーバ</h3>
+            <ul>
+              {discovered.map((d, i) => (
+                <li key={i}>
+                  {d.name} ({d.ip})
+                  {d.wsUrl && <span> — {d.wsUrl}</span>}
+                  <button onClick={() => {
+                    setHost(`http://${d.ip}:8000`);
+                    if (d.wsUrl) setWsHost(d.wsUrl);
+                  }}>接続</button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         <button onClick={checkHealth}>Health確認</button>
         <p>状態: {health}</p>
       </section>
