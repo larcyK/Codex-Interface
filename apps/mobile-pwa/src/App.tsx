@@ -59,6 +59,40 @@ export default function App() {
     return null;
   };
 
+  // Proactively refresh access token before it expires (refresh 60s before exp)
+  useEffect(() => {
+    if (!token) return;
+    let timeoutId: number | undefined;
+    try {
+      const parts = token.split(".");
+      if (parts.length >= 2) {
+        const payloadStr = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+        const decoded = atob(payloadStr);
+        // decodeURIComponent/escape used to safely handle utf8
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        const payload = JSON.parse(decodeURIComponent(escape(decoded)));
+        const exp = payload?.exp as number | undefined;
+        if (exp) {
+          const now = Math.floor(Date.now() / 1000);
+          const msUntilRefresh = (exp - now - 60) * 1000;
+          if (msUntilRefresh <= 0) {
+            // already near expiry -> refresh immediately
+            void refreshAccessToken(token);
+          } else {
+            timeoutId = window.setTimeout(() => {
+              void refreshAccessToken(token);
+            }, msUntilRefresh);
+          }
+        }
+      }
+    } catch (e) {
+      // ignore malformed token
+    }
+    return () => {
+      if (timeoutId) clearTimeout(timeoutId);
+    };
+  }, [token, refreshToken, deviceId, host]);
+
   const api = useMemo(
     () => ({
       get: async (path: string, auth = false) => {
