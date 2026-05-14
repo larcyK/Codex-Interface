@@ -7,8 +7,10 @@ import { dirname, join } from "node:path";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = join(__dirname, "..");
 
-const API_URL = "http://localhost:8000/api/v1";
-const WS_URL = "ws://localhost:8001/ws";
+const HTTP_PORT = process.env.HTTP_PORT || "8000";
+const WS_PORT = process.env.WS_PORT || "8001";
+const API_URL = `http://localhost:${HTTP_PORT}/api/v1`;
+const WS_URL = `ws://localhost:${WS_PORT}/ws`;
 
 let serverProcess: any;
 
@@ -17,9 +19,23 @@ async function startServer() {
   return new Promise((resolve, reject) => {
     serverProcess = spawn("node", ["dist/index.js"], {
       cwd: projectRoot,
-      stdio: ["ignore", "ignore", "ignore"],
+      stdio: ["ignore", "pipe", "pipe"],
+      env: {
+        ...process.env,
+        HTTP_PORT,
+        WS_PORT,
+      },
     });
-    serverProcess.on("error", reject);
+    serverProcess.on("error", (err) => {
+      console.error("Server process error:", err);
+      reject(err);
+    });
+    serverProcess.stdout?.on("data", (data) => {
+      console.log("[server]", data.toString().trim());
+    });
+    serverProcess.stderr?.on("data", (data) => {
+      console.error("[server-err]", data.toString().trim());
+    });
     // Wait until health endpoint responds or timeout
     const start = Date.now();
     const check = async () => {
@@ -29,7 +45,7 @@ async function startServer() {
       } catch (e) {
         // ignore
       }
-      if (Date.now() - start > 5000) return reject(new Error("server did not start in time"));
+      if (Date.now() - start > 10000) return reject(new Error("server did not start in time"));
       setTimeout(check, 200);
     };
     setTimeout(check, 200);

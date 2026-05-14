@@ -1,8 +1,6 @@
-import { spawn } from 'node:child_process';
-import { setTimeout as delay } from 'node:timers/promises';
 import WebSocket from 'ws';
 
-const API = 'http://localhost:8000/api/v1';
+const API = process.env.API_BASE || 'http://localhost:8000/api/v1';
 
 async function post(path, body, token) {
   const res = await fetch(`${API}${path}`, {
