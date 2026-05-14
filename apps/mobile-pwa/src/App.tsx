@@ -212,7 +212,11 @@ export default function App() {
 
   // Auto-reconnect WS when token changes
   const wsConnected = useAutoReconnect(wsHost, token, (eventData) => {
-    setEvents((prev) => [eventData, ...prev].slice(0, 20));
+    const now = new Date().toISOString();
+    const text = typeof eventData === "string" ? eventData : JSON.stringify(eventData);
+    const msg = `${now} ${text}`;
+    console.debug("WS event:", msg);
+    setEvents((prev) => [msg, ...prev].slice(0, 200));
   });
 
   return (
@@ -280,6 +284,9 @@ export default function App() {
 
       <section className="card">
         <h2>WSイベント</h2>
+        <div className="row">
+          <button onClick={() => setEvents([])}>クリア</button>
+        </div>
         <ul className="mono">
           {events.map((e, i) => (
             <li key={`${i}_${e.slice(0, 8)}`}>{e}</li>
