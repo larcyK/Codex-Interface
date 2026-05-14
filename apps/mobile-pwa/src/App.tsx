@@ -34,6 +34,11 @@ export default function App() {
   const [logs, setLogs] = useState<LogItem[]>([]);
   const [events, setEvents] = useState<string[]>([]);
   const [discovered, setDiscovered] = useState<Array<{ name: string; ip: string; wsUrl?: string }>>([]);
+  const [modelInput, setModelInput] = useState("gpt-codex-local");
+  const [promptInput, setPromptInput] = useState("Say hello to Codex");
+  const [streamOutput, setStreamOutput] = useState("");
+  const [isStreaming, setIsStreaming] = useState(false);
+  const wsRef = useMemo(() => ({ ws: null as WebSocket | null }), []);
 
   const refreshAccessToken = async (
     currentToken: string,
@@ -211,6 +216,68 @@ export default function App() {
     setLogs(res.items ?? []);
   };
 
+  const startCodexStream = async () => {
+    setStreamOutput("");
+    setIsStreaming(true);
+    const res = await api.post("/codex/stream", { model: modelInput, prompt: promptInput }, true);
+    if (!res?.streamId || !res?.wsUrl) {
+      setStreamOutput((s) => s + "\nFailed to start stream\n");
+      setIsStreaming(false);
+      return;
+    }
+
+    // replace placeholder token in wsUrl if present
+    const tokenParam = token ? `token=${encodeURIComponent(token)}` : "";
+    const wsUrl = res.wsUrl.replace("<token>", encodeURIComponent(token));
+    try {
+      const ws = new WebSocket(wsUrl);
+      wsRef.ws = ws;
+      ws.onopen = () => {
+        setStreamOutput((s) => s + "\n[ws open]\n");
+      };
+      ws.onmessage = (ev) => {
+        try {
+          const msg = JSON.parse(ev.data);
+          if (msg.type === "chunk") {
+            setStreamOutput((s) => s + msg.text);
+          } else if (msg.type === "done") {
+            setStreamOutput((s) => s + "\n[done]\n");
+            setIsStreaming(false);
+            try { ws.close(); } catch (e) { /* ignore */ }
+          } else if (msg.type === "error") {
+            setStreamOutput((s) => s + `\n[error] ${msg.message}\n`);
+            setIsStreaming(false);
+          }
+        } catch (e) {
+          setStreamOutput((s) => s + `\n[raw] ${String(ev.data)}\n`);
+        }
+      };
+      ws.onerror = (e) => {
+        setStreamOutput((s) => s + `\n[ws error]\n`);
+        setIsStreaming(false);
+      };
+      ws.onclose = () => {
+        setIsStreaming(false);
+        wsRef.ws = null;
+      };
+    } catch (e) {
+      setStreamOutput((s) => s + `\n[connect failed] ${String(e)}\n`);
+      setIsStreaming(false);
+    }
+  };
+
+  const cancelCodexStream = () => {
+    try {
+      if (wsRef.ws && wsRef.ws.readyState === WebSocket.OPEN) {
+        wsRef.ws.send(JSON.stringify({ type: "cancel" }));
+      }
+      wsRef.ws?.close();
+    } catch (e) {
+      // ignore
+    }
+    setIsStreaming(false);
+  };
+
   // Try simple LAN discovery by attempting common .local and hostnames.
   const discoverLan = async () => {
     const candidates = [
@@ -341,6 +408,23 @@ export default function App() {
             <li key={`${i}_${e.slice(0, 8)}`}>{e}</li>
           ))}
         </ul>
+      </section>
+
+      <section className="card">
+        <h2>Codex ストリーミング</h2>
+        <label>
+          Model
+          <input value={modelInput} onChange={(e) => setModelInput(e.target.value)} />
+        </label>
+        <label>
+          Prompt
+          <input value={promptInput} onChange={(e) => setPromptInput(e.target.value)} />
+        </label>
+        <div className="row">
+          <button onClick={startCodexStream} disabled={isStreaming}>Start Stream</button>
+          <button onClick={cancelCodexStream} disabled={!isStreaming}>Cancel</button>
+        </div>
+        <pre className="mono" style={{ whiteSpace: "pre-wrap", maxHeight: 300, overflow: "auto" }}>{streamOutput}</pre>
       </section>
     </main>
   );
