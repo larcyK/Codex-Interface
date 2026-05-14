@@ -62,6 +62,29 @@ test("Authentication Flow", async (t) => {
     });
     assert.equal(res.status, 401);
   });
+
+  await t.test("POST /auth/refresh renews access token", async () => {
+    // Get initial token and refresh token
+    const authRes = await fetch(`${API_URL}/auth/pin`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pin: "123456", deviceName: "refresh-test" }),
+    });
+    const authData = (await authRes.json()) as Record<string, string>;
+    const refreshToken = authData.refreshToken;
+    const deviceId = authData.deviceId || "test-device";
+
+    // Use refresh token to get new access token
+    const refreshRes = await fetch(`${API_URL}/auth/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refreshToken, deviceId }),
+    });
+    assert.equal(refreshRes.status, 200);
+    const refreshData = (await refreshRes.json()) as Record<string, string>;
+    assert(refreshData.accessToken);
+    assert(refreshData.accessToken !== authData.accessToken);
+  });
 });
 
 test("Session Management", async (t) => {
