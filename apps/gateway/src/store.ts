@@ -22,6 +22,7 @@ export class JsonStore {
         sessions: [],
         commands: [],
         logs: [],
+        codexStreams: [],
       };
       this.persist();
     }
@@ -102,6 +103,45 @@ export class JsonStore {
     const items = sorted.slice(start, start + limit);
     const next = start + limit < sorted.length ? String(start + limit) : undefined;
     return { items, nextCursor: next };
+  }
+
+  // Codex stream history (for JsonStore-backed mode)
+  addStreamLog(stream: {
+    streamId: string;
+    model: string;
+    prompt: string;
+    output: string;
+    deviceId: string;
+    tokens?: Record<string, number>;
+    createdAt?: string;
+  }): void {
+    const entry = {
+      streamId: stream.streamId,
+      model: stream.model,
+      prompt: stream.prompt,
+      output: stream.output,
+      deviceId: stream.deviceId,
+      tokens: stream.tokens ?? undefined,
+      createdAt: stream.createdAt ?? nowIso(),
+    };
+    if (!this.state.codexStreams) this.state.codexStreams = [];
+    this.state.codexStreams.push(entry);
+    // keep recent 1000
+    if (this.state.codexStreams.length > 1000) {
+      this.state.codexStreams = this.state.codexStreams.slice(-1000);
+    }
+    this.persist();
+  }
+
+  getStreamHistory(limit = 50, offset = 0): { items: any[]; total: number } {
+    const arr = this.state.codexStreams ? [...this.state.codexStreams].reverse() : [];
+    const items = arr.slice(offset, offset + limit);
+    return { items, total: arr.length };
+  }
+
+  getStreamDetail(streamId: string) {
+    if (!this.state.codexStreams) return null;
+    return this.state.codexStreams.find((s) => s.streamId === streamId) ?? null;
   }
 
   private persist(): void {

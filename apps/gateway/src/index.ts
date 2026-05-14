@@ -277,6 +277,22 @@ wss.on("connection", async (socket: WebSocket, req: IncomingMessage) => {
     return;
   }
 
+  // log close and error for all sockets to aid debugging
+  socket.on("close", (code: number, reason: Buffer) => {
+    try {
+      app.log.info({ remote, streamId, code, reason: reason ? reason.toString() : undefined }, "ws closed");
+    } catch (e) {
+      /* ignore logging errors */
+    }
+  });
+  socket.on("error", (err: any) => {
+    try {
+      app.log.error({ remote, streamId, err }, "ws error");
+    } catch (e) {
+      /* ignore */
+    }
+  });
+
   // Verify token for all ws connections
   try {
     await verifyAccessToken(token);
@@ -311,12 +327,20 @@ wss.on("connection", async (socket: WebSocket, req: IncomingMessage) => {
     // Buffer chunks to collect complete output
     const outputChunks: string[] = [];
 
+    const sendSafe = (obj: any) => {
+      try {
+        socket.send(JSON.stringify(obj));
+      } catch (e) {
+        app.log.warn({ streamId, err: e }, "ws send failed");
+      }
+    };
+
     const onData = (chunk: { seq: number; text: string }) => {
       outputChunks.push(chunk.text);
-      socket.send(JSON.stringify({ type: "chunk", seq: chunk.seq, text: chunk.text }));
+      sendSafe({ type: "chunk", seq: chunk.seq, text: chunk.text });
     };
     const onDone = (meta: any) => {
-      socket.send(JSON.stringify({ type: "done", id: meta.id }));
+      sendSafe({ type: "done", id: meta.id });
       // Save stream to history
       const output = outputChunks.join("");
       store.addStreamLog({
@@ -334,7 +358,7 @@ wss.on("connection", async (socket: WebSocket, req: IncomingMessage) => {
       }
     };
     const onError = (err: any) => {
-      socket.send(JSON.stringify({ type: "error", message: err?.message ?? String(err) }));
+      sendSafe({ type: "error", message: err?.message ?? String(err) });
       try {
         socket.close(1011, "error");
       } catch (e) {
