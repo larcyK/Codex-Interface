@@ -7,9 +7,12 @@
     "apps/mobile-pwa"
   ],
   "scripts": {
-    "dev:gateway": "npm --workspace apps/gateway run dev",
-    "dev:mobile": "npm --workspace apps/mobile-pwa run dev",
+    "dev:clean": "pkill -f 'node.*gateway|vite' 2>/dev/null || true; sleep 1",
+    "dev:gateway": "npm run dev:clean && npm --workspace apps/gateway run dev",
+    "dev:mobile": "npm run dev:clean && npm --workspace apps/mobile-pwa run dev",
     "build": "npm --workspace apps/gateway run build && npm --workspace apps/mobile-pwa run build",
-    "test": "npm --workspace apps/gateway run test"
+    "test": "npm --workspace apps/gateway run test",
+    "test:quick": "echo '⏭️  Dev mode: tests skipped for faster iteration'",
+    "test:full": "npm run build && npm --workspace apps/gateway run test"
   }
 }
