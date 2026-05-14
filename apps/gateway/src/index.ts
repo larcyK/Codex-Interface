@@ -296,14 +296,37 @@ wss.on("connection", async (socket: WebSocket, req: IncomingMessage) => {
       return;
     }
 
+    // Extract deviceId from token
+    let deviceId = "unknown";
+    try {
+      const tokenPayload = await verifyAccessToken(token);
+      deviceId = tokenPayload.sub;
+    } catch (e) {
+      app.log.warn({ streamId }, "Failed to extract deviceId from token");
+    }
+
     const ee = mockCodex.stream(pending.req);
     pending.socket = socket; // track socket for cleanup
 
+    // Buffer chunks to collect complete output
+    const outputChunks: string[] = [];
+
     const onData = (chunk: { seq: number; text: string }) => {
+      outputChunks.push(chunk.text);
       socket.send(JSON.stringify({ type: "chunk", seq: chunk.seq, text: chunk.text }));
     };
     const onDone = (meta: any) => {
       socket.send(JSON.stringify({ type: "done", id: meta.id }));
+      // Save stream to history
+      const output = outputChunks.join("");
+      store.addStreamLog({
+        streamId,
+        model: pending.req.model,
+        prompt: pending.req.prompt,
+        output,
+        deviceId,
+        tokens: pending.req.tokens,
+      });
       try {
         socket.close(1000, "done");
       } catch (e) {
@@ -420,6 +443,48 @@ app.post("/api/v1/codex/stream", async (req, reply) => {
   const wsUrl = `${proto}://${hostname}:${wsPort}/ws?streamId=${streamId}&token=<token>`;
 
   return { streamId, wsUrl };
+});
+
+// Codex history (list)
+app.get("/api/v1/codex/history", async (req, reply) => {
+  const auth = req.headers.authorization;
+  if (!auth?.startsWith("Bearer ")) {
+    return reply.code(401).send({ error: { code: "UNAUTHORIZED", message: "Missing token" } });
+  }
+  try {
+    await verifyAccessToken(auth.slice("Bearer ".length));
+  } catch {
+    return reply.code(401).send({ error: { code: "UNAUTHORIZED", message: "Token invalid" } });
+  }
+
+  const query = req.query as Record<string, any>;
+  const limit = Math.min(Number(query.limit ?? "50"), 100);
+  const offset = Number(query.offset ?? "0");
+
+  const result = store.getStreamHistory(limit, offset);
+  return result;
+});
+
+// Codex history (detail)
+app.get("/api/v1/codex/history/:streamId", async (req, reply) => {
+  const auth = req.headers.authorization;
+  if (!auth?.startsWith("Bearer ")) {
+    return reply.code(401).send({ error: { code: "UNAUTHORIZED", message: "Missing token" } });
+  }
+  try {
+    await verifyAccessToken(auth.slice("Bearer ".length));
+  } catch {
+    return reply.code(401).send({ error: { code: "UNAUTHORIZED", message: "Token invalid" } });
+  }
+
+  const { streamId } = req.params as Record<string, string>;
+  const result = store.getStreamDetail(streamId);
+
+  if (!result) {
+    return reply.code(404).send({ error: { code: "NOT_FOUND", message: "Stream not found" } });
+  }
+
+  return result;
 });
 
 const start = async () => {

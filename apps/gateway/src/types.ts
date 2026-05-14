@@ -33,10 +33,25 @@ export interface LogEntry {
   requestId?: string;
 }
 
+export interface CodexStreamLog {
+  streamId: string;
+  model: string;
+  prompt: string;
+  output: string;
+  deviceId: string;
+  tokens?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+  };
+  createdAt: string;
+}
+
 export interface PersistedState {
   pinHash: string;
   refreshTokens: Record<string, string>;
   sessions: Session[];
   commands: CommandRequest[];
   logs: LogEntry[];
+  codexStreams?: CodexStreamLog[];
 }

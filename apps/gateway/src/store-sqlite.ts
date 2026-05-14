@@ -47,9 +47,21 @@ export class SqliteStore {
         requestId TEXT
       );
 
+      CREATE TABLE IF NOT EXISTS codex_streams (
+        streamId TEXT PRIMARY KEY,
+        model TEXT NOT NULL,
+        prompt TEXT NOT NULL,
+        output TEXT NOT NULL,
+        deviceId TEXT NOT NULL,
+        tokensJson TEXT,
+        createdAt TEXT NOT NULL
+      );
+
       CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON logs(timestamp DESC);
       CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
       CREATE INDEX IF NOT EXISTS idx_commands_sessionId ON commands(sessionId);
+      CREATE INDEX IF NOT EXISTS idx_codex_streams_createdAt ON codex_streams(createdAt DESC);
+      CREATE INDEX IF NOT EXISTS idx_codex_streams_deviceId ON codex_streams(deviceId);
     `);
 
     // Initialize pinHash if not exists
@@ -230,4 +242,84 @@ export class SqliteStore {
   close(): void {
     this.db.close();
   }
+
+  addStreamLog(streamLog: Omit<Record<string, any>, "createdAt"> & { createdAt?: string }): void {
+    const createdAt = streamLog.createdAt || nowIso();
+    this.db
+      .prepare(
+        "INSERT INTO codex_streams (streamId, model, prompt, output, deviceId, tokensJson, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      )
+      .run(
+        streamLog.streamId,
+        streamLog.model,
+        streamLog.prompt,
+        streamLog.output,
+        streamLog.deviceId,
+        streamLog.tokens ? JSON.stringify(streamLog.tokens) : null,
+        createdAt,
+      );
+  }
+
+  getStreamHistory(limit = 50, offset = 0): {
+    items: Array<{
+      streamId: string;
+      model: string;
+      prompt: string;
+      output: string;
+      deviceId: string;
+      tokens?: Record<string, number>;
+      createdAt: string;
+    }>;
+    total: number;
+  } {
+    const rows = this.db
+      .prepare("SELECT * FROM codex_streams ORDER BY createdAt DESC LIMIT ? OFFSET ?")
+      .all(limit, offset) as Array<any>;
+
+    const total = this.db
+      .prepare("SELECT COUNT(*) as cnt FROM codex_streams")
+      .get() as Record<string, number>;
+
+    return {
+      items: rows.map((r) => ({
+        streamId: r.streamId,
+        model: r.model,
+        prompt: r.prompt,
+        output: r.output,
+        deviceId: r.deviceId,
+        tokens: r.tokensJson ? JSON.parse(r.tokensJson) : undefined,
+        createdAt: r.createdAt,
+      })),
+      total: total.cnt,
+    };
+  }
+
+  getStreamDetail(streamId: string): {
+    streamId: string;
+    model: string;
+    prompt: string;
+    output: string;
+    deviceId: string;
+    tokens?: Record<string, number>;
+    createdAt: string;
+  } | null {
+    const row = this.db
+      .prepare("SELECT * FROM codex_streams WHERE streamId = ?")
+      .get(streamId) as Record<string, any> | undefined;
+
+    if (!row) {
+      return null;
+    }
+
+    return {
+      streamId: row.streamId,
+      model: row.model,
+      prompt: row.prompt,
+      output: row.output,
+      deviceId: row.deviceId,
+      tokens: row.tokensJson ? JSON.parse(row.tokensJson) : undefined,
+      createdAt: row.createdAt,
+    };
+  }
 }
+
