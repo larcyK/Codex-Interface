@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAutoReconnect } from "./useAutoReconnect";
+import { getTokens, saveTokens, clearTokens } from "./tokenStorage";
 
 type LogItem = {
   id: string;
@@ -23,7 +24,9 @@ export default function App() {
   });
   const [deviceName, setDeviceName] = useState("mobile-pwa");
   const [pin, setPin] = useState("123456");
-  const [token, setToken] = useState("");
+  const [token, setToken] = useState(() => getTokens().accessToken || "");
+  const [refreshToken, setRefreshToken] = useState(() => getTokens().refreshToken || "");
+  const [deviceId, setDeviceId] = useState(() => getTokens().deviceId || "");
   const [sessionId, setSessionId] = useState("");
   const [health, setHealth] = useState("未接続");
   const [command, setCommand] = useState("status");
@@ -31,23 +34,73 @@ export default function App() {
   const [logs, setLogs] = useState<LogItem[]>([]);
   const [events, setEvents] = useState<string[]>([]);
 
+  const refreshAccessToken = async (
+    currentToken: string,
+  ): Promise<string | null> => {
+    if (!refreshToken || !deviceId) {
+      return null;
+    }
+    try {
+      const r = await fetch(`${host}${API_PREFIX}/auth/refresh`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refreshToken, deviceId }),
+      });
+      if (r.ok) {
+        const data = (await r.json()) as Record<string, string>;
+        const newToken = data.accessToken;
+        setToken(newToken);
+        saveTokens(newToken, refreshToken, deviceId);
+        return newToken;
+      }
+    } catch {
+      // ignore
+    }
+    return null;
+  };
+
   const api = useMemo(
     () => ({
       get: async (path: string, auth = false) => {
+        let currentToken = token;
         const r = await fetch(`${host}${API_PREFIX}${path}`, {
-          headers: auth ? { Authorization: `Bearer ${token}` } : undefined,
+          headers: auth ? { Authorization: `Bearer ${currentToken}` } : undefined,
         });
+        if (r.status === 401 && auth && refreshToken) {
+          const newToken = await refreshAccessToken(currentToken);
+          if (newToken) {
+            currentToken = newToken;
+            return fetch(`${host}${API_PREFIX}${path}`, {
+              headers: { Authorization: `Bearer ${currentToken}` },
+            }).then((r2) => r2.json());
+          }
+        }
         return r.json();
       },
       post: async (path: string, body: unknown, auth = false) => {
+        let currentToken = token;
         const r = await fetch(`${host}${API_PREFIX}${path}`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            ...(auth ? { Authorization: `Bearer ${token}` } : {}),
+            ...(auth ? { Authorization: `Bearer ${currentToken}` } : {}),
           },
           body: JSON.stringify(body),
         });
+        if (r.status === 401 && auth && refreshToken) {
+          const newToken = await refreshAccessToken(currentToken);
+          if (newToken) {
+            currentToken = newToken;
+            return fetch(`${host}${API_PREFIX}${path}`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${currentToken}`,
+              },
+              body: JSON.stringify(body),
+            }).then((r2) => r2.json());
+          }
+        }
         return r.json();
       },
       del: async (path: string) => {
@@ -57,7 +110,7 @@ export default function App() {
         return r.json();
       },
     }),
-    [host, token],
+    [host, token, refreshToken, deviceId],
   );
 
   const checkHealth = async () => {
@@ -68,7 +121,11 @@ export default function App() {
   const login = async () => {
     const res = await api.post("/auth/pin", { pin, deviceName });
     if (res.accessToken) {
+      const newDeviceId = res.deviceId || `dev_${Date.now()}`;
       setToken(res.accessToken);
+      setRefreshToken(res.refreshToken);
+      setDeviceId(newDeviceId);
+      saveTokens(res.accessToken, res.refreshToken, newDeviceId);
       setCommandResult("認証成功");
     } else {
       setCommandResult("認証失敗");
@@ -86,6 +143,15 @@ export default function App() {
   const closeSession = async () => {
     await api.del("/sessions/current");
     setSessionId("");
+  };
+
+  const logout = () => {
+    clearTokens();
+    setToken("");
+    setRefreshToken("");
+    setDeviceId("");
+    setSessionId("");
+    setCommandResult("ログアウト");
   };
 
   const runCommand = async () => {
@@ -142,8 +208,12 @@ export default function App() {
           PIN
           <input value={pin} onChange={(e) => setPin(e.target.value)} type="password" />
         </label>
-        <button onClick={login}>PINログイン</button>
+        <div className="row">
+          <button onClick={login}>PINログイン</button>
+          <button onClick={logout}>ログアウト</button>
+        </div>
         <p className="mono">Token: {token ? `${token.slice(0, 24)}...` : "未取得"}</p>
+        <p className="mono">RefreshToken: {refreshToken ? "保存済" : "なし"}</p>
         <p className="mono">WS: {wsConnected ? "✓接続中" : "✗切断"}</p>
       </section>
 
