@@ -12,6 +12,7 @@ import {
   verifyAccessToken,
   verifyPin,
 } from "./auth.js";
+import mockCodex from "./codex-adapter-mock.js";
 import { JsonStore } from "./store.js";
 import { SqliteStore } from "./store-sqlite.js";
 
@@ -262,17 +263,28 @@ app.get("/api/v1/logs", async (req) => {
 });
 
 const wss = new WebSocketServer({ port: wsPort, path: "/ws" });
+// map of pending stream requests created by /api/v1/codex/stream
+const pendingStreams = new Map<string, { req: any; createdAt: number }>();
 wss.on("connection", async (socket: WebSocket, req: IncomingMessage) => {
   const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
   const token = url.searchParams.get("token");
+  const pathname = url.pathname;
 
   if (!token) {
     socket.close(1008, "missing token");
     return;
   }
 
+  // Verify token for all ws connections
   try {
     await verifyAccessToken(token);
+  } catch {
+    socket.close(1008, "invalid token");
+    return;
+  }
+
+  // Handle regular server event WS
+  if (pathname === "/ws") {
     wsClients.add(socket);
     socket.send(
       JSON.stringify({
@@ -281,14 +293,130 @@ wss.on("connection", async (socket: WebSocket, req: IncomingMessage) => {
         payload: { status: "connected" },
       }),
     );
-  } catch {
-    socket.close(1008, "invalid token");
+    socket.on("close", () => {
+      wsClients.delete(socket);
+    });
     return;
   }
 
-  socket.on("close", () => {
-    wsClients.delete(socket);
-  });
+  // Handle Codex streaming WS on /ws/codex
+  if (pathname === "/ws/codex") {
+    const streamId = url.searchParams.get("streamId");
+    if (!streamId) {
+      socket.close(1008, "missing streamId");
+      return;
+    }
+
+    const pending = pendingStreams.get(streamId);
+    if (!pending) {
+      socket.close(1008, "unknown streamId");
+      return;
+    }
+
+    const ee = mockCodex.stream(pending.req);
+
+    const onData = (chunk: { seq: number; text: string }) => {
+      socket.send(JSON.stringify({ type: "chunk", seq: chunk.seq, text: chunk.text }));
+    };
+    const onDone = (meta: any) => {
+      socket.send(JSON.stringify({ type: "done", id: meta.id }));
+      try {
+        socket.close(1000, "done");
+      } catch (e) {
+        /* ignore */
+      }
+    };
+    const onError = (err: any) => {
+      socket.send(JSON.stringify({ type: "error", message: err?.message ?? String(err) }));
+      try {
+        socket.close(1011, "error");
+      } catch (e) {
+        /* ignore */
+      }
+    };
+
+    ee.on("data", onData);
+    ee.on("done", onDone);
+    ee.on("error", onError);
+
+    socket.on("message", (m) => {
+      try {
+        const parsed = JSON.parse(String(m));
+        if (parsed?.type === "cancel") {
+          ee.emit("cancel");
+        }
+      } catch {
+        // ignore
+      }
+    });
+
+    socket.on("close", () => {
+      ee.removeListener("data", onData);
+      ee.removeListener("done", onDone);
+      ee.removeListener("error", onError);
+      pendingStreams.delete(streamId);
+    });
+
+    return;
+  }
+
+  // Unknown path
+  socket.close(1008, "unsupported path");
+});
+
+// Codex execute (sync)
+const codexExecSchema = z.object({
+  model: z.string().min(1),
+  prompt: z.string().min(1),
+  maxTokens: z.number().optional(),
+  temperature: z.number().optional(),
+  metadata: z.record(z.unknown()).optional(),
+});
+
+app.post("/api/v1/codex/execute", async (req, reply) => {
+  const auth = req.headers.authorization;
+  if (!auth?.startsWith("Bearer ")) {
+    return reply.code(401).send({ error: { code: "UNAUTHORIZED", message: "Missing token" } });
+  }
+  try {
+    await verifyAccessToken(auth.slice("Bearer ".length));
+  } catch {
+    return reply.code(401).send({ error: { code: "UNAUTHORIZED", message: "Token invalid" } });
+  }
+
+  const parsed = codexExecSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return reply.code(400).send({ error: { code: "INVALID_REQUEST", message: "Invalid payload" } });
+  }
+
+  const { model, prompt } = parsed.data;
+  const res = await mockCodex.executeSync(parsed.data as any);
+  store.addLog({ level: "info", category: "codex", message: `execute ${model}`, requestId: res.id });
+  return { id: res.id, output: res.output };
+});
+
+// Codex stream (start)
+app.post("/api/v1/codex/stream", async (req, reply) => {
+  const auth = req.headers.authorization;
+  if (!auth?.startsWith("Bearer ")) {
+    return reply.code(401).send({ error: { code: "UNAUTHORIZED", message: "Missing token" } });
+  }
+  try {
+    await verifyAccessToken(auth.slice("Bearer ".length));
+  } catch {
+    return reply.code(401).send({ error: { code: "UNAUTHORIZED", message: "Token invalid" } });
+  }
+
+  const parsed = codexExecSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return reply.code(400).send({ error: { code: "INVALID_REQUEST", message: "Invalid payload" } });
+  }
+
+  const streamId = `stream_${randomUUID()}`;
+  pendingStreams.set(streamId, { req: parsed.data, createdAt: Date.now() });
+  store.addLog({ level: "info", category: "codex", message: `stream started`, requestId: streamId });
+
+  return { streamId, wsUrl: `ws://localhost:${wsPort}/ws/codex?streamId=${streamId}&token=<token>` };
 });
 
 const start = async () => {
