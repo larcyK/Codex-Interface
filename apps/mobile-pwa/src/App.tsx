@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { useAutoReconnect } from "./useAutoReconnect";
 import { getTokens, saveTokens, clearTokens } from "./tokenStorage";
 
@@ -211,13 +211,15 @@ export default function App() {
   };
 
   // Auto-reconnect WS when token changes
-  const wsConnected = useAutoReconnect(wsHost, token, (eventData) => {
+  const handleWsEvent = useCallback((eventData: string | unknown) => {
     const now = new Date().toISOString();
     const text = typeof eventData === "string" ? eventData : JSON.stringify(eventData);
     const msg = `${now} ${text}`;
     console.debug("WS event:", msg);
     setEvents((prev) => [msg, ...prev].slice(0, 200));
-  });
+  }, [setEvents]);
+
+  const wsConnected = useAutoReconnect(wsHost, token, handleWsEvent);
 
   return (
     <main className="app">
