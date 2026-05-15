@@ -1,33 +1,6 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
-// Lazy-load react-markdown and remark-gfm in the browser at runtime.
-const useMarkdownLoader = () => {
-  const [md, setMd] = useState<any>(null);
-  const [gfm, setGfm] = useState<any>(null);
-  useEffect(() => {
-    let mounted = true;
-    (async () => {
-      try {
-        const pkg1 = "react-markdown";
-        const pkg2 = "remark-gfm";
-        // use variable module names so TypeScript doesn't require type declarations at build time
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-        const m = await import(pkg1 as any);
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-        const r = await import(pkg2 as any);
-        if (mounted) {
-          setMd(() => (m && (m.default ?? m)));
-          setGfm(() => (r && (r.default ?? r)));
-        }
-      } catch (e) {
-        // ignore; leave md null to fall back to plain text
-      }
-    })();
-    return () => {
-      mounted = false;
-    };
-  }, []);
-  return { md, gfm };
-};
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { useAutoReconnect } from "./useAutoReconnect";
 import { getTokens, saveTokens, clearTokens } from "./tokenStorage";
 
@@ -85,7 +58,6 @@ export default function App() {
     createdAt: string;
   } | null>(null);
   const wsRef = useMemo(() => ({ ws: null as WebSocket | null }), []);
-  const { md: ReactMarkdown, gfm: remarkGfm } = useMarkdownLoader();
 
   type ChatMessage = { id: string; role: "user" | "assistant"; text: string; status?: "streaming" | "done" | "error" };
   const [messages, setMessages] = useState<ChatMessage[]>([]);
