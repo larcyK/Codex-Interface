@@ -519,10 +519,14 @@ export default function App() {
               <div className="chat-meta"><strong>{m.role === "user" ? "You" : "Codex"}</strong> {m.status === "streaming" ? "(typing...)" : ""}</div>
               <div className="chat-bubble">
                 <div className="chat-text">
-                  {ReactMarkdown ? (
-                    <ReactMarkdown remarkPlugins={remarkGfm ? [remarkGfm] : []}>{m.text}</ReactMarkdown>
+                  {m.status === "streaming" ? (
+                    <pre className="mono chat-streaming" style={{ whiteSpace: "pre-wrap", margin: 0 }}>{m.text}</pre>
                   ) : (
-                    m.text
+                    ReactMarkdown ? (
+                      <ReactMarkdown remarkPlugins={remarkGfm ? [remarkGfm] : []}>{m.text}</ReactMarkdown>
+                    ) : (
+                      m.text
+                    )
                   )}
                 </div>
               </div>
@@ -553,7 +557,9 @@ export default function App() {
           <button onClick={cancelCodexStream} disabled={!isStreaming}>Cancel</button>
         </div>
         <div style={{ maxHeight: 300, overflowY: "auto", overflowX: "auto", wordBreak: "break-word", overflowWrap: "anywhere", maxWidth: "100%" }}>
-          {ReactMarkdown ? (
+          {isStreaming ? (
+            <pre className="mono" style={{ whiteSpace: "pre-wrap", margin: 0 }}>{streamOutput}</pre>
+          ) : ReactMarkdown ? (
             <ReactMarkdown remarkPlugins={remarkGfm ? [remarkGfm] : []}>{streamOutput}</ReactMarkdown>
           ) : (
             <pre className="mono" style={{ whiteSpace: "pre-wrap" }}>{streamOutput}</pre>
