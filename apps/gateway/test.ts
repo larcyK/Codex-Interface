@@ -3,6 +3,7 @@ import { strict as assert } from "node:assert";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { isPrime } from "./src/prime.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = join(__dirname, "..");
@@ -13,6 +14,21 @@ const API_URL = `http://localhost:${HTTP_PORT}/api/v1`;
 const WS_URL = `ws://localhost:${WS_PORT}/ws`;
 
 let serverProcess: any;
+
+test("Prime Checker", async (t) => {
+  await t.test("returns true for prime numbers", () => {
+    assert.equal(isPrime(2), true);
+    assert.equal(isPrime(3), true);
+    assert.equal(isPrime(97), true);
+  });
+
+  await t.test("returns false for non-prime values", () => {
+    assert.equal(isPrime(1), false);
+    assert.equal(isPrime(12), false);
+    assert.equal(isPrime(-7), false);
+    assert.equal(isPrime(4.5), false);
+  });
+});
 
 // Start server before tests
 async function startServer() {
