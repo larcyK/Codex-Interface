@@ -22,7 +22,7 @@ const getCliConfig = () => {
   const command = process.env.CODEX_CLI_COMMAND ?? "codex";
   const rawArgs = parseArgs(process.env.CODEX_CLI_ARGS);
   // Default to non-interactive execution mode.
-  const args = rawArgs.length > 0 ? rawArgs : ["exec"];
+  const args = rawArgs.length > 0 ? rawArgs : ["exec", "--color", "always"];
   const promptMode = (process.env.CODEX_CLI_PROMPT_MODE ?? "stdin").toLowerCase();
   const timeoutMs = Number(process.env.CODEX_CLI_TIMEOUT_MS ?? "120000");
   const usePtyEnv = (process.env.CODEX_CLI_USE_PTY ?? "").toLowerCase();
@@ -40,6 +40,9 @@ export class CliCodexAdapter implements CodexAdapter {
 
     return await new Promise((resolve, reject) => {
       const finalArgs = [...args];
+      if (command.endsWith("codex") && !finalArgs.includes("--color")) {
+        finalArgs.push("--color", "always");
+      }
       if (effectivePromptMode === "arg") {
         finalArgs.push(req.prompt);
       }
@@ -48,6 +51,9 @@ export class CliCodexAdapter implements CodexAdapter {
         stdio: [stdinSpec, "pipe", "pipe"],
         env: {
           ...process.env,
+          TERM: process.env.TERM ?? "xterm-256color",
+          FORCE_COLOR: "1",
+          CLICOLOR_FORCE: "1",
           CODEX_MODEL: req.model,
           CODEX_MAX_TOKENS: String(req.maxTokens ?? ""),
           CODEX_TEMPERATURE: String(req.temperature ?? ""),
@@ -103,6 +109,9 @@ export class CliCodexAdapter implements CodexAdapter {
     // the caller has a chance to attach listeners
     ee.on("error", () => {});
     const finalArgs = [...args];
+    if (command.endsWith("codex") && !finalArgs.includes("--color")) {
+      finalArgs.push("--color", "always");
+    }
 
     // if CODEX_CLI_PROMPT_MODE=stdin but no PTY requested, fall back to arg to avoid CLI TTY errors
     const effectivePromptMode = promptMode === "stdin" && !usePty ? "arg" : promptMode;
@@ -116,6 +125,9 @@ export class CliCodexAdapter implements CodexAdapter {
       stdio: [stdinSpec, "pipe", "pipe"],
       env: {
         ...process.env,
+        TERM: process.env.TERM ?? "xterm-256color",
+        FORCE_COLOR: "1",
+        CLICOLOR_FORCE: "1",
         CODEX_MODEL: req.model,
         CODEX_MAX_TOKENS: String(req.maxTokens ?? ""),
         CODEX_TEMPERATURE: String(req.temperature ?? ""),
@@ -129,7 +141,7 @@ export class CliCodexAdapter implements CodexAdapter {
     const timeout = setTimeout(() => {
       if (!finished) {
         child.kill("SIGKILL");
-            setImmediate(() => ee.emit("error", { code: "TIMEOUT", message: `codex cli timed out after ${timeoutMs}ms` }));
+        setImmediate(() => ee.emit("error", { code: "TIMEOUT", message: `codex cli timed out after ${timeoutMs}ms` }));
       }
     }, timeoutMs);
 
@@ -144,7 +156,12 @@ export class CliCodexAdapter implements CodexAdapter {
 
     if (child.stderr) {
       child.stderr.on("data", (buf: Buffer) => {
-        stderrText += buf.toString("utf-8");
+        const text = buf.toString("utf-8");
+        stderrText += text;
+        if (text) {
+          seq += 1;
+          setImmediate(() => ee.emit("data", { seq, text }));
+        }
       });
     }
 
@@ -152,7 +169,7 @@ export class CliCodexAdapter implements CodexAdapter {
       if (finished) return;
       finished = true;
       clearTimeout(timeout);
-          setImmediate(() => ee.emit("error", { code: "SPAWN_ERROR", message: e.message }));
+      setImmediate(() => ee.emit("error", { code: "SPAWN_ERROR", message: e.message }));
     });
 
     child.on("close", (code) => {
@@ -160,15 +177,15 @@ export class CliCodexAdapter implements CodexAdapter {
       finished = true;
       clearTimeout(timeout);
       if (code === 0) {
-            setImmediate(() => ee.emit("done", { id }));
+        setImmediate(() => ee.emit("done", { id }));
         return;
       }
-          setImmediate(() =>
-            ee.emit("error", {
-              code: "PROCESS_EXIT",
-              message: `codex cli exited with code ${String(code)}${stderrText ? `: ${stderrText.trim()}` : ""}`,
-            }),
-          );
+      setImmediate(() =>
+        ee.emit("error", {
+          code: "PROCESS_EXIT",
+          message: `codex cli exited with code ${String(code)}${stderrText ? `: ${stderrText.trim()}` : ""}`,
+        }),
+      );
     });
 
     ee.once("cancel", () => {

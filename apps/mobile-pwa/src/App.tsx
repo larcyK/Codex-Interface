@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState, useCallback } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Terminal } from "@xterm/xterm";
+import { FitAddon } from "@xterm/addon-fit";
+import "@xterm/xterm/css/xterm.css";
 import { useAutoReconnect } from "./useAutoReconnect";
-import { getTokens, saveTokens, clearTokens } from "./tokenStorage";
+import { clearTokens, getTokens, saveTokens } from "./tokenStorage";
 
 type LogItem = {
   id: string;
@@ -36,7 +37,7 @@ export default function App() {
   const [logs, setLogs] = useState<LogItem[]>([]);
   const [events, setEvents] = useState<string[]>([]);
   const [discovered, setDiscovered] = useState<Array<{ name: string; ip: string; wsUrl?: string }>>([]);
-  const [modelInput, setModelInput] = useState("gpt-codex-local");
+  const [modelInput, setModelInput] = useState("gpt-5.4");
   const [promptInput, setPromptInput] = useState("Say hello to Codex");
   const [backendChoice, setBackendChoice] = useState<"mock" | "cli">("cli");
   const [streamOutput, setStreamOutput] = useState("");
@@ -57,15 +58,80 @@ export default function App() {
     deviceId: string;
     createdAt: string;
   } | null>(null);
-  const wsRef = useMemo(() => ({ ws: null as WebSocket | null }), []);
-
-  type ChatMessage = { id: string; role: "user" | "assistant"; text: string; status?: "streaming" | "done" | "error" };
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
+  const [terminalStatus, setTerminalStatus] = useState("ready");
 
-  const refreshAccessToken = async (
-    currentToken: string,
-  ): Promise<string | null> => {
+  const wsRef = useMemo(() => ({ ws: null as WebSocket | null }), []);
+  const terminalHostRef = useRef<HTMLDivElement | null>(null);
+  const terminalRef = useRef<Terminal | null>(null);
+  const fitAddonRef = useRef<FitAddon | null>(null);
+  const transcriptRef = useRef("");
+  const isStreamingRef = useRef(false);
+  const terminalStatusRef = useRef("ready");
+
+  useEffect(() => {
+    isStreamingRef.current = isStreaming;
+  }, [isStreaming]);
+
+  useEffect(() => {
+    terminalStatusRef.current = terminalStatus;
+  }, [terminalStatus]);
+
+  const appendTerminal = useCallback((text: string) => {
+    transcriptRef.current += text;
+    setStreamOutput(transcriptRef.current);
+    terminalRef.current?.write(text);
+  }, []);
+
+  const resetTerminal = useCallback(() => {
+    transcriptRef.current = "";
+    setStreamOutput("");
+    if (terminalRef.current) {
+      terminalRef.current.reset();
+      terminalRef.current.clear();
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!terminalHostRef.current) return;
+
+    const fitAddon = new FitAddon();
+    const term = new Terminal({
+      convertEol: true,
+      disableStdin: true,
+      cursorBlink: true,
+      fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+      fontSize: 13,
+      lineHeight: 1.35,
+      theme: {
+        background: "#0b1220",
+        foreground: "#dbe7ff",
+        cursor: "#93c5fd",
+        selectionBackground: "rgba(147, 197, 253, 0.28)",
+      },
+    });
+
+    term.loadAddon(fitAddon);
+    term.open(terminalHostRef.current);
+    fitAddon.fit();
+    term.writeln("Codex terminal ready.");
+    term.writeln("");
+
+    terminalRef.current = term;
+    fitAddonRef.current = fitAddon;
+
+    const handleResize = () => fitAddon.fit();
+    window.addEventListener("resize", handleResize);
+
+    return () => {
+      window.removeEventListener("resize", handleResize);
+      term.dispose();
+      terminalRef.current = null;
+      fitAddonRef.current = null;
+    };
+  }, []);
+
+  const refreshAccessToken = async (currentToken: string): Promise<string | null> => {
     if (!refreshToken || !deviceId) {
       return null;
     }
@@ -88,7 +154,6 @@ export default function App() {
     return null;
   };
 
-  // Proactively refresh access token before it expires (refresh 60s before exp)
   useEffect(() => {
     if (!token) return;
     let timeoutId: number | undefined;
@@ -97,15 +162,12 @@ export default function App() {
       if (parts.length >= 2) {
         const payloadStr = parts[1].replace(/-/g, "+").replace(/_/g, "/");
         const decoded = atob(payloadStr);
-        // decodeURIComponent/escape used to safely handle utf8
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-        const payload = JSON.parse(decodeURIComponent(escape(decoded)));
-        const exp = payload?.exp as number | undefined;
+        const payload = JSON.parse(decodeURIComponent(escape(decoded))) as { exp?: number };
+        const exp = payload.exp;
         if (exp) {
           const now = Math.floor(Date.now() / 1000);
           const msUntilRefresh = (exp - now - 60) * 1000;
           if (msUntilRefresh <= 0) {
-            // already near expiry -> refresh immediately
             void refreshAccessToken(token);
           } else {
             timeoutId = window.setTimeout(() => {
@@ -114,7 +176,7 @@ export default function App() {
           }
         }
       }
-    } catch (e) {
+    } catch {
       // ignore malformed token
     }
     return () => {
@@ -253,61 +315,93 @@ export default function App() {
     }
   };
 
-  const startCodexStream = async () => {
-    setStreamOutput("");
+  const openTerminalStream = useCallback(async (prompt: string) => {
+    if (!prompt.trim() || isStreaming) return;
+
+    resetTerminal();
+    setSelectedStream(null);
     setIsStreaming(true);
+    setTerminalStatus("connecting");
+    appendTerminal(`\x1b[90m[local] starting Codex stream for model=${modelInput}, backend=${backendChoice}\x1b[0m\r\n`);
+
     const res = await api.post(
       "/codex/stream",
-      { model: modelInput, prompt: promptInput, metadata: { backend: backendChoice } },
+      { model: modelInput, prompt, metadata: { backend: backendChoice } },
       true,
     );
     if (!res?.streamId || !res?.wsUrl) {
-      setStreamOutput((s) => s + "\nFailed to start stream\n");
+      appendTerminal("\x1b[31m[error] failed to start stream\x1b[0m\r\n");
+      setTerminalStatus("error");
       setIsStreaming(false);
       return;
     }
 
-    // replace placeholder token in wsUrl if present
-    // Prefer token persisted in storage (may have been refreshed during API call)
     const stored = getTokens().accessToken || token;
     const wsUrl = res.wsUrl.replace("<token>", encodeURIComponent(stored || ""));
     try {
-      setStreamOutput((s) => s + `\n[connecting to] ${wsUrl}\n[location] ${typeof window !== 'undefined' ? window.location.href : 'unknown'}\n`);
       const ws = new WebSocket(wsUrl);
       wsRef.ws = ws;
       ws.onopen = () => {
-        setStreamOutput((s) => s + "\n[ws open]\n");
+        setTerminalStatus("streaming");
+        appendTerminal(`\x1b[90m[ws open] ${wsUrl}\x1b[0m\r\n`);
       };
       ws.onmessage = (ev) => {
         try {
-          const msg = JSON.parse(ev.data);
+          const msg = JSON.parse(ev.data) as { type: string; text?: string; message?: string };
           if (msg.type === "chunk") {
-            setStreamOutput((s) => s + msg.text);
+            appendTerminal(msg.text ?? "");
+            fitAddonRef.current?.fit();
           } else if (msg.type === "done") {
-            setStreamOutput((s) => s + "\n[done]\n");
+            appendTerminal("\r\n\x1b[32m[done]\x1b[0m\r\n");
+            setTerminalStatus("done");
             setIsStreaming(false);
-            try { ws.close(); } catch (e) { /* ignore */ }
+            try {
+              ws.close();
+            } catch {
+              // ignore
+            }
           } else if (msg.type === "error") {
-            setStreamOutput((s) => s + `\n[error] ${msg.message}\n`);
+            appendTerminal(`\r\n\x1b[31m[error] ${msg.message ?? "unknown error"}\x1b[0m\r\n`);
+            setTerminalStatus("error");
             setIsStreaming(false);
           }
-        } catch (e) {
-          setStreamOutput((s) => s + `\n[raw] ${String(ev.data)}\n`);
+        } catch {
+          appendTerminal(`\r\n[raw] ${String(ev.data)}\r\n`);
         }
       };
       ws.onerror = (e) => {
-        setStreamOutput((s) => s + `\n[ws error] ${String((e as any)?.message ?? e)}\n`);
+        appendTerminal(`\r\n\x1b[31m[ws error] ${String((e as { message?: string })?.message ?? "unknown")}\x1b[0m\r\n`);
+        setTerminalStatus("error");
         setIsStreaming(false);
       };
       ws.onclose = (ev) => {
-        setIsStreaming(false);
         wsRef.ws = null;
-        setStreamOutput((s) => s + `\n[ws closed] code=${ev.code} reason=${ev.reason}\n`);
+        if (isStreamingRef.current) {
+          appendTerminal(`\r\n\x1b[90m[ws closed] code=${ev.code} reason=${ev.reason}\x1b[0m\r\n`);
+        }
+        if (terminalStatusRef.current === "streaming") {
+          setTerminalStatus("idle");
+        }
+        setIsStreaming(false);
       };
     } catch (e) {
-      setStreamOutput((s) => s + `\n[connect failed] ${String(e)}\n`);
+      appendTerminal(`\r\n\x1b[31m[connect failed] ${String(e)}\x1b[0m\r\n`);
+      setTerminalStatus("error");
       setIsStreaming(false);
     }
+  }, [
+    api,
+    appendTerminal,
+    backendChoice,
+    isStreaming,
+    modelInput,
+    resetTerminal,
+    token,
+    wsRef,
+  ]);
+
+  const startCodexStream = async () => {
+    await openTerminalStream(promptInput);
   };
 
   const cancelCodexStream = () => {
@@ -316,74 +410,32 @@ export default function App() {
         wsRef.ws.send(JSON.stringify({ type: "cancel" }));
       }
       wsRef.ws?.close();
-    } catch (e) {
+    } catch {
       // ignore
     }
+    appendTerminal("\r\n\x1b[33m[cancel requested]\x1b[0m\r\n");
+    setTerminalStatus("idle");
     setIsStreaming(false);
   };
 
   const sendChatMessage = async () => {
-    if (!chatInput.trim()) return;
-    const userId = `m_${Date.now()}`;
-    setMessages((m) => [...m, { id: userId, role: "user", text: chatInput }]);
-
-    // start assistant placeholder
-    const placeholderId = `assist_${Date.now()}`;
-    setMessages((m) => [...m, { id: placeholderId, role: "assistant", text: "", status: "streaming" }]);
-
-    // start stream
-    const res = await api.post(
-      "/codex/stream",
-      { model: modelInput, prompt: chatInput, metadata: { backend: backendChoice } },
-      true,
-    );
-    if (!res?.streamId || !res?.wsUrl) {
-      setMessages((m) => m.map((mm) => (mm.id === placeholderId ? { ...mm, text: "Failed to start stream", status: "error" } : mm)));
-      return;
-    }
-
-    const stored = getTokens().accessToken || token;
-    const wsUrl = res.wsUrl.replace("<token>", encodeURIComponent(stored || ""));
-    let ws: WebSocket | null = null;
-    try {
-      ws = new WebSocket(wsUrl);
-      ws.onopen = () => {
-        // no-op
-      };
-      ws.onmessage = (ev) => {
-        try {
-          const msg = JSON.parse(ev.data);
-          if (msg.type === "chunk") {
-            setMessages((m) => m.map((mm) => (mm.id === placeholderId ? { ...mm, text: mm.text + msg.text } : mm)));
-          } else if (msg.type === "done") {
-            setMessages((m) => m.map((mm) => (mm.id === placeholderId ? { ...mm, status: "done" } : mm)));
-            try { ws?.close(); } catch (e) {}
-          } else if (msg.type === "error") {
-            setMessages((m) => m.map((mm) => (mm.id === placeholderId ? { ...mm, text: mm.text + `\n[error] ${msg.message}`, status: "error" } : mm)));
-          }
-        } catch (e) {
-          setMessages((m) => m.map((mm) => (mm.id === placeholderId ? { ...mm, text: mm.text + `\n[raw] ${String(ev.data)}` } : mm)));
-        }
-      };
-      ws.onerror = () => {
-        setMessages((m) => m.map((mm) => (mm.id === placeholderId ? { ...mm, status: "error" } : mm)));
-      };
-      ws.onclose = () => {
-        setMessages((m) => m.map((mm) => (mm.id === placeholderId && mm.status !== "done" ? { ...mm, status: "done" } : mm)));
-      };
-    } catch (e) {
-      setMessages((m) => m.map((mm) => (mm.id === placeholderId ? { ...mm, text: "[connect failed] " + String(e), status: "error" } : mm)));
-    }
-
+    const prompt = chatInput.trim();
+    if (!prompt) return;
+    setPromptInput(prompt);
     setChatInput("");
+    await openTerminalStream(prompt);
   };
 
-  // Try simple LAN discovery by attempting common .local and hostnames.
+  const clearTerminalView = () => {
+    resetTerminal();
+    terminalRef.current?.writeln("Codex terminal cleared.");
+    terminalRef.current?.writeln("");
+    setTerminalStatus("ready");
+  };
+
   const discoverLan = async () => {
     const candidates = [
-      // advertised default
       "codex-host.local",
-      // try local hostname
       typeof window !== "undefined" ? `${window.location.hostname}` : "",
     ].filter(Boolean) as string[];
 
@@ -396,7 +448,7 @@ export default function App() {
           if (!r.ok) return;
           const data = await r.json();
           results.push({ name: data.name ?? c, ip: data.ip ?? c, wsUrl: data.wsUrl });
-        } catch (e) {
+        } catch {
           // ignore unreachable
         }
       }),
@@ -404,20 +456,20 @@ export default function App() {
     setDiscovered(results);
   };
 
-  // Auto-reconnect WS when token changes
   const handleWsEvent = useCallback((eventData: string | unknown) => {
     const now = new Date().toISOString();
     const text = typeof eventData === "string" ? eventData : JSON.stringify(eventData);
     const msg = `${now} ${text}`;
     console.debug("WS event:", msg);
     setEvents((prev) => [msg, ...prev].slice(0, 200));
-  }, [setEvents]);
+  }, []);
 
   const wsConnected = useAutoReconnect(wsHost, token, handleWsEvent);
 
   return (
     <main className="app">
       <h1>Codex Interface Mobile</h1>
+
       <section className="card">
         <h2>接続設定</h2>
         <label>
@@ -439,10 +491,14 @@ export default function App() {
                 <li key={i}>
                   {d.name} ({d.ip})
                   {d.wsUrl && <span> — {d.wsUrl}</span>}
-                  <button onClick={() => {
-                    setHost(`http://${d.ip}:8000`);
-                    if (d.wsUrl) setWsHost(d.wsUrl);
-                  }}>接続</button>
+                  <button
+                    onClick={() => {
+                      setHost(`http://${d.ip}:8000`);
+                      if (d.wsUrl) setWsHost(d.wsUrl);
+                    }}
+                  >
+                    接続
+                  </button>
                 </li>
               ))}
             </ul>
@@ -487,6 +543,44 @@ export default function App() {
       </section>
 
       <section className="card">
+        <h2>Codex Terminal</h2>
+        <p className="mono">status: {terminalStatus}</p>
+        <div className="terminal-frame">
+          <div ref={terminalHostRef} className="terminal-host" />
+        </div>
+        <div className="row terminal-actions">
+          <input
+            style={{ flex: 1 }}
+            value={chatInput}
+            onChange={(e) => setChatInput(e.target.value)}
+            placeholder="Send a prompt to Codex..."
+          />
+          <button onClick={sendChatMessage} disabled={!token || !chatInput.trim() || isStreaming}>Send</button>
+          <button onClick={cancelCodexStream} disabled={!isStreaming}>Cancel</button>
+          <button onClick={clearTerminalView}>Clear</button>
+        </div>
+        <label>
+          Model
+          <input value={modelInput} onChange={(e) => setModelInput(e.target.value)} />
+        </label>
+        <label>
+          Backend
+          <select value={backendChoice} onChange={(e) => setBackendChoice(e.target.value as "mock" | "cli")}>
+            <option value="cli">cli</option>
+            <option value="mock">mock</option>
+          </select>
+        </label>
+        <label>
+          Prompt
+          <input value={promptInput} onChange={(e) => setPromptInput(e.target.value)} />
+        </label>
+        <div className="row">
+          <button onClick={startCodexStream} disabled={isStreaming}>Run Prompt</button>
+          <button onClick={fetchStreamHistory}>履歴を取得</button>
+        </div>
+      </section>
+
+      <section className="card">
         <h2>ログ</h2>
         <button onClick={fetchLogs}>最新取得</button>
         <ul>
@@ -508,63 +602,6 @@ export default function App() {
             <li key={`${i}_${e.slice(0, 8)}`}>{e}</li>
           ))}
         </ul>
-      </section>
-
-      <section className="card">
-        <h2>Codex ストリーミング</h2>
-        <h3>チャット</h3>
-        <div className="chat-area">
-          {messages.map((m) => (
-            <div key={m.id} className={`chat-message ${m.role === "user" ? "user" : "assistant"}`}>
-              <div className="chat-meta"><strong>{m.role === "user" ? "You" : "Codex"}</strong> {m.status === "streaming" ? "(typing...)" : ""}</div>
-              <div className="chat-bubble">
-                <div className="chat-text">
-                  {m.status === "streaming" ? (
-                    <pre className="mono chat-streaming" style={{ whiteSpace: "pre-wrap", margin: 0 }}>{m.text}</pre>
-                  ) : (
-                    ReactMarkdown ? (
-                      <ReactMarkdown remarkPlugins={remarkGfm ? [remarkGfm] : []}>{m.text}</ReactMarkdown>
-                    ) : (
-                      m.text
-                    )
-                  )}
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-        <div className="row">
-          <input style={{ flex: 1 }} value={chatInput} onChange={(e) => setChatInput(e.target.value)} placeholder="Type a message..." />
-          <button onClick={sendChatMessage} disabled={!token || !chatInput.trim()}>Send</button>
-        </div>
-        <label>
-          Model
-          <input value={modelInput} onChange={(e) => setModelInput(e.target.value)} />
-        </label>
-        <label>
-          Backend
-          <select value={backendChoice} onChange={(e) => setBackendChoice(e.target.value as any)}>
-            <option value="cli">cli</option>
-            <option value="mock">mock</option>
-          </select>
-        </label>
-        <label>
-          Prompt
-          <input value={promptInput} onChange={(e) => setPromptInput(e.target.value)} />
-        </label>
-        <div className="row">
-          <button onClick={startCodexStream} disabled={isStreaming}>Start Stream</button>
-          <button onClick={cancelCodexStream} disabled={!isStreaming}>Cancel</button>
-        </div>
-        <div style={{ maxHeight: 300, overflowY: "auto", overflowX: "auto", wordBreak: "break-word", overflowWrap: "anywhere", maxWidth: "100%" }}>
-          {isStreaming ? (
-            <pre className="mono" style={{ whiteSpace: "pre-wrap", margin: 0 }}>{streamOutput}</pre>
-          ) : ReactMarkdown ? (
-            <ReactMarkdown remarkPlugins={remarkGfm ? [remarkGfm] : []}>{streamOutput}</ReactMarkdown>
-          ) : (
-            <pre className="mono" style={{ whiteSpace: "pre-wrap" }}>{streamOutput}</pre>
-          )}
-        </div>
       </section>
 
       <section className="card">
@@ -593,21 +630,9 @@ export default function App() {
             <p><strong>Device:</strong> {selectedStream.deviceId}</p>
             <p><strong>Created:</strong> {new Date(selectedStream.createdAt).toLocaleString()}</p>
             <p><strong>Prompt:</strong></p>
-            <div style={{ maxHeight: 150, overflowY: "auto", overflowX: "auto", wordBreak: "break-word", overflowWrap: "anywhere", maxWidth: "100%" }}>
-              {ReactMarkdown ? (
-                <ReactMarkdown remarkPlugins={remarkGfm ? [remarkGfm] : []}>{selectedStream.prompt}</ReactMarkdown>
-              ) : (
-                <pre className="mono" style={{ whiteSpace: "pre-wrap" }}>{selectedStream.prompt}</pre>
-              )}
-            </div>
+            <pre className="mono terminal-history">{selectedStream.prompt}</pre>
             <p><strong>Output:</strong></p>
-            <div style={{ maxHeight: 200, overflowY: "auto", overflowX: "auto", wordBreak: "break-word", overflowWrap: "anywhere", maxWidth: "100%" }}>
-              {ReactMarkdown ? (
-                <ReactMarkdown remarkPlugins={remarkGfm ? [remarkGfm] : []}>{selectedStream.output}</ReactMarkdown>
-              ) : (
-                <pre className="mono" style={{ whiteSpace: "pre-wrap" }}>{selectedStream.output}</pre>
-              )}
-            </div>
+            <pre className="mono terminal-history">{selectedStream.output}</pre>
           </div>
         )}
       </section>
