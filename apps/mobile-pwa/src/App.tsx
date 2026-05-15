@@ -57,6 +57,10 @@ export default function App() {
   } | null>(null);
   const wsRef = useMemo(() => ({ ws: null as WebSocket | null }), []);
 
+  type ChatMessage = { id: string; role: "user" | "assistant"; text: string; status?: "streaming" | "done" | "error" };
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState("");
+
   const refreshAccessToken = async (
     currentToken: string,
   ): Promise<string | null> => {
@@ -316,6 +320,62 @@ export default function App() {
     setIsStreaming(false);
   };
 
+  const sendChatMessage = async () => {
+    if (!chatInput.trim()) return;
+    const userId = `m_${Date.now()}`;
+    setMessages((m) => [...m, { id: userId, role: "user", text: chatInput }]);
+
+    // start assistant placeholder
+    const placeholderId = `assist_${Date.now()}`;
+    setMessages((m) => [...m, { id: placeholderId, role: "assistant", text: "", status: "streaming" }]);
+
+    // start stream
+    const res = await api.post(
+      "/codex/stream",
+      { model: modelInput, prompt: chatInput, metadata: { backend: backendChoice } },
+      true,
+    );
+    if (!res?.streamId || !res?.wsUrl) {
+      setMessages((m) => m.map((mm) => (mm.id === placeholderId ? { ...mm, text: "Failed to start stream", status: "error" } : mm)));
+      return;
+    }
+
+    const stored = getTokens().accessToken || token;
+    const wsUrl = res.wsUrl.replace("<token>", encodeURIComponent(stored || ""));
+    let ws: WebSocket | null = null;
+    try {
+      ws = new WebSocket(wsUrl);
+      ws.onopen = () => {
+        // no-op
+      };
+      ws.onmessage = (ev) => {
+        try {
+          const msg = JSON.parse(ev.data);
+          if (msg.type === "chunk") {
+            setMessages((m) => m.map((mm) => (mm.id === placeholderId ? { ...mm, text: mm.text + msg.text } : mm)));
+          } else if (msg.type === "done") {
+            setMessages((m) => m.map((mm) => (mm.id === placeholderId ? { ...mm, status: "done" } : mm)));
+            try { ws?.close(); } catch (e) {}
+          } else if (msg.type === "error") {
+            setMessages((m) => m.map((mm) => (mm.id === placeholderId ? { ...mm, text: mm.text + `\n[error] ${msg.message}`, status: "error" } : mm)));
+          }
+        } catch (e) {
+          setMessages((m) => m.map((mm) => (mm.id === placeholderId ? { ...mm, text: mm.text + `\n[raw] ${String(ev.data)}` } : mm)));
+        }
+      };
+      ws.onerror = () => {
+        setMessages((m) => m.map((mm) => (mm.id === placeholderId ? { ...mm, status: "error" } : mm)));
+      };
+      ws.onclose = () => {
+        setMessages((m) => m.map((mm) => (mm.id === placeholderId && mm.status !== "done" ? { ...mm, status: "done" } : mm)));
+      };
+    } catch (e) {
+      setMessages((m) => m.map((mm) => (mm.id === placeholderId ? { ...mm, text: "[connect failed] " + String(e), status: "error" } : mm)));
+    }
+
+    setChatInput("");
+  };
+
   // Try simple LAN discovery by attempting common .local and hostnames.
   const discoverLan = async () => {
     const candidates = [
@@ -450,6 +510,19 @@ export default function App() {
 
       <section className="card">
         <h2>Codex ストリーミング</h2>
+        <h3>チャット</h3>
+        <div style={{ border: "1px solid #ddd", padding: 8, maxHeight: 300, overflow: "auto", marginBottom: 8 }}>
+          {messages.map((m) => (
+            <div key={m.id} style={{ marginBottom: 8 }}>
+              <div style={{ fontWeight: "bold" }}>{m.role === "user" ? "You" : "Codex"} {m.status === "streaming" ? "(typing...)" : ""}</div>
+              <div style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", overflowWrap: "anywhere", maxWidth: "100%" }}>{m.text}</div>
+            </div>
+          ))}
+        </div>
+        <div className="row">
+          <input style={{ flex: 1 }} value={chatInput} onChange={(e) => setChatInput(e.target.value)} placeholder="Type a message..." />
+          <button onClick={sendChatMessage} disabled={!token || !chatInput.trim()}>Send</button>
+        </div>
         <label>
           Model
           <input value={modelInput} onChange={(e) => setModelInput(e.target.value)} />
@@ -469,7 +542,20 @@ export default function App() {
           <button onClick={startCodexStream} disabled={isStreaming}>Start Stream</button>
           <button onClick={cancelCodexStream} disabled={!isStreaming}>Cancel</button>
         </div>
-        <pre className="mono" style={{ whiteSpace: "pre-wrap", maxHeight: 300, overflow: "auto" }}>{streamOutput}</pre>
+        <pre
+          className="mono"
+          style={{
+            whiteSpace: "pre-wrap",
+            maxHeight: 300,
+            overflowY: "auto",
+            overflowX: "auto",
+            wordBreak: "break-word",
+            overflowWrap: "anywhere",
+            maxWidth: "100%",
+          }}
+        >
+          {streamOutput}
+        </pre>
       </section>
 
       <section className="card">
@@ -498,9 +584,9 @@ export default function App() {
             <p><strong>Device:</strong> {selectedStream.deviceId}</p>
             <p><strong>Created:</strong> {new Date(selectedStream.createdAt).toLocaleString()}</p>
             <p><strong>Prompt:</strong></p>
-            <pre className="mono" style={{ whiteSpace: "pre-wrap", maxHeight: 150, overflow: "auto" }}>{selectedStream.prompt}</pre>
+            <pre className="mono" style={{ whiteSpace: "pre-wrap", maxHeight: 150, overflowY: "auto", overflowX: "auto", wordBreak: "break-word", overflowWrap: "anywhere", maxWidth: "100%" }}>{selectedStream.prompt}</pre>
             <p><strong>Output:</strong></p>
-            <pre className="mono" style={{ whiteSpace: "pre-wrap", maxHeight: 200, overflow: "auto" }}>{selectedStream.output}</pre>
+            <pre className="mono" style={{ whiteSpace: "pre-wrap", maxHeight: 200, overflowY: "auto", overflowX: "auto", wordBreak: "break-word", overflowWrap: "anywhere", maxWidth: "100%" }}>{selectedStream.output}</pre>
           </div>
         )}
       </section>

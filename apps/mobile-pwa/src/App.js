@@ -34,6 +34,8 @@ export default function App() {
     const [streamHistory, setStreamHistory] = useState([]);
     const [selectedStream, setSelectedStream] = useState(null);
     const wsRef = useMemo(() => ({ ws: null }), []);
+    const [messages, setMessages] = useState([]);
+    const [chatInput, setChatInput] = useState("");
     const refreshAccessToken = async (currentToken) => {
         if (!refreshToken || !deviceId) {
             return null;
@@ -279,6 +281,61 @@ export default function App() {
         }
         setIsStreaming(false);
     };
+    const sendChatMessage = async () => {
+        if (!chatInput.trim())
+            return;
+        const userId = `m_${Date.now()}`;
+        setMessages((m) => [...m, { id: userId, role: "user", text: chatInput }]);
+        // start assistant placeholder
+        const placeholderId = `assist_${Date.now()}`;
+        setMessages((m) => [...m, { id: placeholderId, role: "assistant", text: "", status: "streaming" }]);
+        // start stream
+        const res = await api.post("/codex/stream", { model: modelInput, prompt: chatInput, metadata: { backend: backendChoice } }, true);
+        if (!res?.streamId || !res?.wsUrl) {
+            setMessages((m) => m.map((mm) => (mm.id === placeholderId ? { ...mm, text: "Failed to start stream", status: "error" } : mm)));
+            return;
+        }
+        const stored = getTokens().accessToken || token;
+        const wsUrl = res.wsUrl.replace("<token>", encodeURIComponent(stored || ""));
+        let ws = null;
+        try {
+            ws = new WebSocket(wsUrl);
+            ws.onopen = () => {
+                // no-op
+            };
+            ws.onmessage = (ev) => {
+                try {
+                    const msg = JSON.parse(ev.data);
+                    if (msg.type === "chunk") {
+                        setMessages((m) => m.map((mm) => (mm.id === placeholderId ? { ...mm, text: mm.text + msg.text } : mm)));
+                    }
+                    else if (msg.type === "done") {
+                        setMessages((m) => m.map((mm) => (mm.id === placeholderId ? { ...mm, status: "done" } : mm)));
+                        try {
+                            ws?.close();
+                        }
+                        catch (e) { }
+                    }
+                    else if (msg.type === "error") {
+                        setMessages((m) => m.map((mm) => (mm.id === placeholderId ? { ...mm, text: mm.text + `\n[error] ${msg.message}`, status: "error" } : mm)));
+                    }
+                }
+                catch (e) {
+                    setMessages((m) => m.map((mm) => (mm.id === placeholderId ? { ...mm, text: mm.text + `\n[raw] ${String(ev.data)}` } : mm)));
+                }
+            };
+            ws.onerror = () => {
+                setMessages((m) => m.map((mm) => (mm.id === placeholderId ? { ...mm, status: "error" } : mm)));
+            };
+            ws.onclose = () => {
+                setMessages((m) => m.map((mm) => (mm.id === placeholderId && mm.status !== "done" ? { ...mm, status: "done" } : mm)));
+            };
+        }
+        catch (e) {
+            setMessages((m) => m.map((mm) => (mm.id === placeholderId ? { ...mm, text: "[connect failed] " + String(e), status: "error" } : mm)));
+        }
+        setChatInput("");
+    };
     // Try simple LAN discovery by attempting common .local and hostnames.
     const discoverLan = async () => {
         const candidates = [
@@ -316,5 +373,13 @@ export default function App() {
                                                 setHost(`http://${d.ip}:8000`);
                                                 if (d.wsUrl)
                                                     setWsHost(d.wsUrl);
-                                            }, children: "\u63A5\u7D9A" })] }, i))) })] })), _jsx("button", { onClick: checkHealth, children: "Health\u78BA\u8A8D" }), _jsxs("p", { children: ["\u72B6\u614B: ", health] })] }), _jsxs("section", { className: "card", children: [_jsx("h2", { children: "\u8A8D\u8A3C" }), _jsxs("label", { children: ["Device Name", _jsx("input", { value: deviceName, onChange: (e) => setDeviceName(e.target.value) })] }), _jsxs("label", { children: ["PIN", _jsx("input", { value: pin, onChange: (e) => setPin(e.target.value), type: "password" })] }), _jsxs("div", { className: "row", children: [_jsx("button", { onClick: login, children: "PIN\u30ED\u30B0\u30A4\u30F3" }), _jsx("button", { onClick: logout, children: "\u30ED\u30B0\u30A2\u30A6\u30C8" })] }), _jsxs("p", { className: "mono", children: ["Token: ", token ? `${token.slice(0, 24)}...` : "未取得"] }), _jsxs("p", { className: "mono", children: ["RefreshToken: ", refreshToken ? "保存済" : "なし"] }), _jsxs("p", { className: "mono", children: ["WS: ", wsConnected ? "✓接続中" : "✗切断"] })] }), _jsxs("section", { className: "card", children: [_jsx("h2", { children: "\u30BB\u30C3\u30B7\u30E7\u30F3/\u30B3\u30DE\u30F3\u30C9" }), _jsxs("div", { className: "row", children: [_jsx("button", { onClick: startSession, children: "\u30BB\u30C3\u30B7\u30E7\u30F3\u958B\u59CB" }), _jsx("button", { onClick: closeSession, children: "\u30BB\u30C3\u30B7\u30E7\u30F3\u7D42\u4E86" })] }), _jsxs("p", { className: "mono", children: ["Session: ", sessionId || "なし"] }), _jsxs("label", { children: ["Command", _jsx("input", { value: command, onChange: (e) => setCommand(e.target.value) })] }), _jsx("button", { onClick: runCommand, children: "\u5B9F\u884C" }), _jsxs("p", { className: "mono", children: ["\u7D50\u679C: ", commandResult] })] }), _jsxs("section", { className: "card", children: [_jsx("h2", { children: "\u30ED\u30B0" }), _jsx("button", { onClick: fetchLogs, children: "\u6700\u65B0\u53D6\u5F97" }), _jsx("ul", { children: logs.map((l) => (_jsxs("li", { children: [l.timestamp, " [", l.level, "] ", l.message] }, l.id))) })] }), _jsxs("section", { className: "card", children: [_jsx("h2", { children: "WS\u30A4\u30D9\u30F3\u30C8" }), _jsx("div", { className: "row", children: _jsx("button", { onClick: () => setEvents([]), children: "\u30AF\u30EA\u30A2" }) }), _jsx("ul", { className: "mono", children: events.map((e, i) => (_jsx("li", { children: e }, `${i}_${e.slice(0, 8)}`))) })] }), _jsxs("section", { className: "card", children: [_jsx("h2", { children: "Codex \u30B9\u30C8\u30EA\u30FC\u30DF\u30F3\u30B0" }), _jsxs("label", { children: ["Model", _jsx("input", { value: modelInput, onChange: (e) => setModelInput(e.target.value) })] }), _jsxs("label", { children: ["Backend", _jsxs("select", { value: backendChoice, onChange: (e) => setBackendChoice(e.target.value), children: [_jsx("option", { value: "cli", children: "cli" }), _jsx("option", { value: "mock", children: "mock" })] })] }), _jsxs("label", { children: ["Prompt", _jsx("input", { value: promptInput, onChange: (e) => setPromptInput(e.target.value) })] }), _jsxs("div", { className: "row", children: [_jsx("button", { onClick: startCodexStream, disabled: isStreaming, children: "Start Stream" }), _jsx("button", { onClick: cancelCodexStream, disabled: !isStreaming, children: "Cancel" })] }), _jsx("pre", { className: "mono", style: { whiteSpace: "pre-wrap", maxHeight: 300, overflow: "auto" }, children: streamOutput })] }), _jsxs("section", { className: "card", children: [_jsx("h2", { children: "Codex \u30B9\u30C8\u30EA\u30FC\u30E0\u5C65\u6B74" }), _jsxs("div", { className: "row", children: [_jsx("button", { onClick: fetchStreamHistory, children: "\u5C65\u6B74\u3092\u53D6\u5F97" }), _jsx("button", { onClick: () => setSelectedStream(null), children: "\u30AF\u30EA\u30A2" })] }), streamHistory.length > 0 && (_jsxs("div", { children: [_jsx("h3", { children: "\u904E\u53BB\u306E\u30B9\u30C8\u30EA\u30FC\u30E0" }), _jsx("ul", { children: streamHistory.map((s) => (_jsxs("li", { children: [_jsx("strong", { children: s.model }), " ", new Date(s.createdAt).toLocaleString(), " ", _jsx("button", { onClick: () => loadStreamDetail(s.streamId), children: "\u8A73\u7D30" })] }, s.streamId))) })] })), selectedStream && (_jsxs("div", { className: "card", style: { marginTop: 16, backgroundColor: "#f5f5f5" }, children: [_jsx("h3", { children: "\u30B9\u30C8\u30EA\u30FC\u30E0\u8A73\u7D30" }), _jsxs("p", { children: [_jsx("strong", { children: "Model:" }), " ", selectedStream.model] }), _jsxs("p", { children: [_jsx("strong", { children: "Device:" }), " ", selectedStream.deviceId] }), _jsxs("p", { children: [_jsx("strong", { children: "Created:" }), " ", new Date(selectedStream.createdAt).toLocaleString()] }), _jsx("p", { children: _jsx("strong", { children: "Prompt:" }) }), _jsx("pre", { className: "mono", style: { whiteSpace: "pre-wrap", maxHeight: 150, overflow: "auto" }, children: selectedStream.prompt }), _jsx("p", { children: _jsx("strong", { children: "Output:" }) }), _jsx("pre", { className: "mono", style: { whiteSpace: "pre-wrap", maxHeight: 200, overflow: "auto" }, children: selectedStream.output })] }))] })] }));
+                                            }, children: "\u63A5\u7D9A" })] }, i))) })] })), _jsx("button", { onClick: checkHealth, children: "Health\u78BA\u8A8D" }), _jsxs("p", { children: ["\u72B6\u614B: ", health] })] }), _jsxs("section", { className: "card", children: [_jsx("h2", { children: "\u8A8D\u8A3C" }), _jsxs("label", { children: ["Device Name", _jsx("input", { value: deviceName, onChange: (e) => setDeviceName(e.target.value) })] }), _jsxs("label", { children: ["PIN", _jsx("input", { value: pin, onChange: (e) => setPin(e.target.value), type: "password" })] }), _jsxs("div", { className: "row", children: [_jsx("button", { onClick: login, children: "PIN\u30ED\u30B0\u30A4\u30F3" }), _jsx("button", { onClick: logout, children: "\u30ED\u30B0\u30A2\u30A6\u30C8" })] }), _jsxs("p", { className: "mono", children: ["Token: ", token ? `${token.slice(0, 24)}...` : "未取得"] }), _jsxs("p", { className: "mono", children: ["RefreshToken: ", refreshToken ? "保存済" : "なし"] }), _jsxs("p", { className: "mono", children: ["WS: ", wsConnected ? "✓接続中" : "✗切断"] })] }), _jsxs("section", { className: "card", children: [_jsx("h2", { children: "\u30BB\u30C3\u30B7\u30E7\u30F3/\u30B3\u30DE\u30F3\u30C9" }), _jsxs("div", { className: "row", children: [_jsx("button", { onClick: startSession, children: "\u30BB\u30C3\u30B7\u30E7\u30F3\u958B\u59CB" }), _jsx("button", { onClick: closeSession, children: "\u30BB\u30C3\u30B7\u30E7\u30F3\u7D42\u4E86" })] }), _jsxs("p", { className: "mono", children: ["Session: ", sessionId || "なし"] }), _jsxs("label", { children: ["Command", _jsx("input", { value: command, onChange: (e) => setCommand(e.target.value) })] }), _jsx("button", { onClick: runCommand, children: "\u5B9F\u884C" }), _jsxs("p", { className: "mono", children: ["\u7D50\u679C: ", commandResult] })] }), _jsxs("section", { className: "card", children: [_jsx("h2", { children: "\u30ED\u30B0" }), _jsx("button", { onClick: fetchLogs, children: "\u6700\u65B0\u53D6\u5F97" }), _jsx("ul", { children: logs.map((l) => (_jsxs("li", { children: [l.timestamp, " [", l.level, "] ", l.message] }, l.id))) })] }), _jsxs("section", { className: "card", children: [_jsx("h2", { children: "WS\u30A4\u30D9\u30F3\u30C8" }), _jsx("div", { className: "row", children: _jsx("button", { onClick: () => setEvents([]), children: "\u30AF\u30EA\u30A2" }) }), _jsx("ul", { className: "mono", children: events.map((e, i) => (_jsx("li", { children: e }, `${i}_${e.slice(0, 8)}`))) })] }), _jsxs("section", { className: "card", children: [_jsx("h2", { children: "Codex \u30B9\u30C8\u30EA\u30FC\u30DF\u30F3\u30B0" }), _jsx("h3", { children: "\u30C1\u30E3\u30C3\u30C8" }), _jsx("div", { style: { border: "1px solid #ddd", padding: 8, maxHeight: 300, overflow: "auto", marginBottom: 8 }, children: messages.map((m) => (_jsxs("div", { style: { marginBottom: 8 }, children: [_jsxs("div", { style: { fontWeight: "bold" }, children: [m.role === "user" ? "You" : "Codex", " ", m.status === "streaming" ? "(typing...)" : ""] }), _jsx("div", { style: { whiteSpace: "pre-wrap", wordBreak: "break-word", overflowWrap: "anywhere", maxWidth: "100%" }, children: m.text })] }, m.id))) }), _jsxs("div", { className: "row", children: [_jsx("input", { style: { flex: 1 }, value: chatInput, onChange: (e) => setChatInput(e.target.value), placeholder: "Type a message..." }), _jsx("button", { onClick: sendChatMessage, disabled: !token || !chatInput.trim(), children: "Send" })] }), _jsxs("label", { children: ["Model", _jsx("input", { value: modelInput, onChange: (e) => setModelInput(e.target.value) })] }), _jsxs("label", { children: ["Backend", _jsxs("select", { value: backendChoice, onChange: (e) => setBackendChoice(e.target.value), children: [_jsx("option", { value: "cli", children: "cli" }), _jsx("option", { value: "mock", children: "mock" })] })] }), _jsxs("label", { children: ["Prompt", _jsx("input", { value: promptInput, onChange: (e) => setPromptInput(e.target.value) })] }), _jsxs("div", { className: "row", children: [_jsx("button", { onClick: startCodexStream, disabled: isStreaming, children: "Start Stream" }), _jsx("button", { onClick: cancelCodexStream, disabled: !isStreaming, children: "Cancel" })] }), _jsx("pre", { className: "mono", style: {
+                            whiteSpace: "pre-wrap",
+                            maxHeight: 300,
+                            overflowY: "auto",
+                            overflowX: "auto",
+                            wordBreak: "break-word",
+                            overflowWrap: "anywhere",
+                            maxWidth: "100%",
+                        }, children: streamOutput })] }), _jsxs("section", { className: "card", children: [_jsx("h2", { children: "Codex \u30B9\u30C8\u30EA\u30FC\u30E0\u5C65\u6B74" }), _jsxs("div", { className: "row", children: [_jsx("button", { onClick: fetchStreamHistory, children: "\u5C65\u6B74\u3092\u53D6\u5F97" }), _jsx("button", { onClick: () => setSelectedStream(null), children: "\u30AF\u30EA\u30A2" })] }), streamHistory.length > 0 && (_jsxs("div", { children: [_jsx("h3", { children: "\u904E\u53BB\u306E\u30B9\u30C8\u30EA\u30FC\u30E0" }), _jsx("ul", { children: streamHistory.map((s) => (_jsxs("li", { children: [_jsx("strong", { children: s.model }), " ", new Date(s.createdAt).toLocaleString(), " ", _jsx("button", { onClick: () => loadStreamDetail(s.streamId), children: "\u8A73\u7D30" })] }, s.streamId))) })] })), selectedStream && (_jsxs("div", { className: "card", style: { marginTop: 16, backgroundColor: "#f5f5f5" }, children: [_jsx("h3", { children: "\u30B9\u30C8\u30EA\u30FC\u30E0\u8A73\u7D30" }), _jsxs("p", { children: [_jsx("strong", { children: "Model:" }), " ", selectedStream.model] }), _jsxs("p", { children: [_jsx("strong", { children: "Device:" }), " ", selectedStream.deviceId] }), _jsxs("p", { children: [_jsx("strong", { children: "Created:" }), " ", new Date(selectedStream.createdAt).toLocaleString()] }), _jsx("p", { children: _jsx("strong", { children: "Prompt:" }) }), _jsx("pre", { className: "mono", style: { whiteSpace: "pre-wrap", maxHeight: 150, overflowY: "auto", overflowX: "auto", wordBreak: "break-word", overflowWrap: "anywhere", maxWidth: "100%" }, children: selectedStream.prompt }), _jsx("p", { children: _jsx("strong", { children: "Output:" }) }), _jsx("pre", { className: "mono", style: { whiteSpace: "pre-wrap", maxHeight: 200, overflowY: "auto", overflowX: "auto", wordBreak: "break-word", overflowWrap: "anywhere", maxWidth: "100%" }, children: selectedStream.output })] }))] })] }));
 }

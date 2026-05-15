@@ -20,25 +20,32 @@ const parseArgs = (raw?: string): string[] => {
 
 const getCliConfig = () => {
   const command = process.env.CODEX_CLI_COMMAND ?? "codex";
-  const args = parseArgs(process.env.CODEX_CLI_ARGS);
+  const rawArgs = parseArgs(process.env.CODEX_CLI_ARGS);
+  // Default to non-interactive execution mode.
+  const args = rawArgs.length > 0 ? rawArgs : ["exec"];
   const promptMode = (process.env.CODEX_CLI_PROMPT_MODE ?? "stdin").toLowerCase();
   const timeoutMs = Number(process.env.CODEX_CLI_TIMEOUT_MS ?? "120000");
-  return { command, args, promptMode, timeoutMs };
+  const usePtyEnv = (process.env.CODEX_CLI_USE_PTY ?? "").toLowerCase();
+  const usePty = usePtyEnv === "1" || usePtyEnv === "true";
+  return { command, args, promptMode, timeoutMs, usePty };
 };
 
 export class CliCodexAdapter implements CodexAdapter {
   async executeSync(req: ExecutionRequest): Promise<{ id: string; output: string }> {
-    const { command, args, promptMode, timeoutMs } = getCliConfig();
+    const { command, args, promptMode, timeoutMs, usePty } = getCliConfig();
+    // if CODEX_CLI_PROMPT_MODE=stdin but no PTY requested, fall back to arg to avoid CLI TTY errors
+    const effectivePromptMode = promptMode === "stdin" && !usePty ? "arg" : promptMode;
     const id = `cli-${randomUUID()}`;
+    const stdinSpec = effectivePromptMode === "arg" ? "ignore" : "pipe";
 
     return await new Promise((resolve, reject) => {
       const finalArgs = [...args];
-      if (promptMode === "arg") {
+      if (effectivePromptMode === "arg") {
         finalArgs.push(req.prompt);
       }
 
       const child = spawn(command, finalArgs, {
-        stdio: ["pipe", "pipe", "pipe"],
+        stdio: [stdinSpec, "pipe", "pipe"],
         env: {
           ...process.env,
           CODEX_MODEL: req.model,
@@ -55,13 +62,17 @@ export class CliCodexAdapter implements CodexAdapter {
         reject(new Error(`codex cli timed out after ${timeoutMs}ms`));
       }, timeoutMs);
 
-      child.stdout.on("data", (buf: Buffer) => {
-        out += buf.toString("utf-8");
-      });
+      if (child.stdout) {
+        child.stdout.on("data", (buf: Buffer) => {
+          out += buf.toString("utf-8");
+        });
+      }
 
-      child.stderr.on("data", (buf: Buffer) => {
-        err += buf.toString("utf-8");
-      });
+      if (child.stderr) {
+        child.stderr.on("data", (buf: Buffer) => {
+          err += buf.toString("utf-8");
+        });
+      }
 
       child.on("error", (e) => {
         clearTimeout(timeout);
@@ -77,7 +88,7 @@ export class CliCodexAdapter implements CodexAdapter {
         reject(new Error(`codex cli exited with code ${String(code)}${err ? `: ${err.trim()}` : ""}`));
       });
 
-      if (promptMode !== "arg") {
+      if (effectivePromptMode !== "arg" && child.stdin) {
         child.stdin.write(req.prompt);
         child.stdin.end();
       }
@@ -85,17 +96,24 @@ export class CliCodexAdapter implements CodexAdapter {
   }
 
   stream(req: ExecutionRequest): EventEmitter {
-    const { command, args, promptMode, timeoutMs } = getCliConfig();
+    const { command, args, promptMode, timeoutMs, usePty } = getCliConfig();
     const id = `cli-${randomUUID()}`;
     const ee = new EventEmitter();
+    // prevent unhandled 'error' from crashing the process if adapter emits before
+    // the caller has a chance to attach listeners
+    ee.on("error", () => {});
     const finalArgs = [...args];
 
-    if (promptMode === "arg") {
+    // if CODEX_CLI_PROMPT_MODE=stdin but no PTY requested, fall back to arg to avoid CLI TTY errors
+    const effectivePromptMode = promptMode === "stdin" && !usePty ? "arg" : promptMode;
+    const stdinSpec = effectivePromptMode === "arg" ? "ignore" : "pipe";
+
+    if (effectivePromptMode === "arg") {
       finalArgs.push(req.prompt);
     }
 
     const child = spawn(command, finalArgs, {
-      stdio: ["pipe", "pipe", "pipe"],
+      stdio: [stdinSpec, "pipe", "pipe"],
       env: {
         ...process.env,
         CODEX_MODEL: req.model,
@@ -111,26 +129,30 @@ export class CliCodexAdapter implements CodexAdapter {
     const timeout = setTimeout(() => {
       if (!finished) {
         child.kill("SIGKILL");
-        ee.emit("error", { code: "TIMEOUT", message: `codex cli timed out after ${timeoutMs}ms` });
+            setImmediate(() => ee.emit("error", { code: "TIMEOUT", message: `codex cli timed out after ${timeoutMs}ms` }));
       }
     }, timeoutMs);
 
-    child.stdout.on("data", (buf: Buffer) => {
-      const text = buf.toString("utf-8");
-      if (!text) return;
-      seq += 1;
-      ee.emit("data", { seq, text });
-    });
+    if (child.stdout) {
+      child.stdout.on("data", (buf: Buffer) => {
+        const text = buf.toString("utf-8");
+        if (!text) return;
+        seq += 1;
+        setImmediate(() => ee.emit("data", { seq, text }));
+      });
+    }
 
-    child.stderr.on("data", (buf: Buffer) => {
-      stderrText += buf.toString("utf-8");
-    });
+    if (child.stderr) {
+      child.stderr.on("data", (buf: Buffer) => {
+        stderrText += buf.toString("utf-8");
+      });
+    }
 
     child.on("error", (e) => {
       if (finished) return;
       finished = true;
       clearTimeout(timeout);
-      ee.emit("error", { code: "SPAWN_ERROR", message: e.message });
+          setImmediate(() => ee.emit("error", { code: "SPAWN_ERROR", message: e.message }));
     });
 
     child.on("close", (code) => {
@@ -138,13 +160,15 @@ export class CliCodexAdapter implements CodexAdapter {
       finished = true;
       clearTimeout(timeout);
       if (code === 0) {
-        ee.emit("done", { id });
+            setImmediate(() => ee.emit("done", { id }));
         return;
       }
-      ee.emit("error", {
-        code: "PROCESS_EXIT",
-        message: `codex cli exited with code ${String(code)}${stderrText ? `: ${stderrText.trim()}` : ""}`,
-      });
+          setImmediate(() =>
+            ee.emit("error", {
+              code: "PROCESS_EXIT",
+              message: `codex cli exited with code ${String(code)}${stderrText ? `: ${stderrText.trim()}` : ""}`,
+            }),
+          );
     });
 
     ee.once("cancel", () => {
@@ -157,7 +181,7 @@ export class CliCodexAdapter implements CodexAdapter {
       }, 2000);
     });
 
-    if (promptMode !== "arg") {
+    if (effectivePromptMode !== "arg" && child.stdin) {
       child.stdin.write(req.prompt);
       child.stdin.end();
     }
