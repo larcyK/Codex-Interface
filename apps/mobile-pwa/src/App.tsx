@@ -36,6 +36,7 @@ export default function App() {
   const [discovered, setDiscovered] = useState<Array<{ name: string; ip: string; wsUrl?: string }>>([]);
   const [modelInput, setModelInput] = useState("gpt-codex-local");
   const [promptInput, setPromptInput] = useState("Say hello to Codex");
+  const [backendChoice, setBackendChoice] = useState<"mock" | "cli">("cli");
   const [streamOutput, setStreamOutput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamHistory, setStreamHistory] = useState<Array<{
@@ -249,7 +250,11 @@ export default function App() {
   const startCodexStream = async () => {
     setStreamOutput("");
     setIsStreaming(true);
-    const res = await api.post("/codex/stream", { model: modelInput, prompt: promptInput }, true);
+    const res = await api.post(
+      "/codex/stream",
+      { model: modelInput, prompt: promptInput, metadata: { backend: backendChoice } },
+      true,
+    );
     if (!res?.streamId || !res?.wsUrl) {
       setStreamOutput((s) => s + "\nFailed to start stream\n");
       setIsStreaming(false);
@@ -448,6 +453,13 @@ export default function App() {
         <label>
           Model
           <input value={modelInput} onChange={(e) => setModelInput(e.target.value)} />
+        </label>
+        <label>
+          Backend
+          <select value={backendChoice} onChange={(e) => setBackendChoice(e.target.value as any)}>
+            <option value="cli">cli</option>
+            <option value="mock">mock</option>
+          </select>
         </label>
         <label>
           Prompt

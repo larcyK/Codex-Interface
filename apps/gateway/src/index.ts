@@ -12,7 +12,7 @@ import {
   verifyAccessToken,
   verifyPin,
 } from "./auth.js";
-import { getCodexAdapter, getCodexBackendName } from "./codex-adapter.js";
+import { getCodexAdapter, getCodexBackendName, cliAdapter } from "./codex-adapter.js";
 import { JsonStore } from "./store.js";
 import { SqliteStore } from "./store-sqlite.js";
 
@@ -323,7 +323,9 @@ wss.on("connection", async (socket: WebSocket, req: IncomingMessage) => {
       app.log.warn({ streamId }, "Failed to extract deviceId from token");
     }
 
-    const ee = codexAdapter.stream(pending.req);
+    const override = (pending.req.metadata?.backend as string | undefined) || undefined;
+    const adapterForStream = override === "cli" ? cliAdapter : codexAdapter;
+    const ee = adapterForStream.stream(pending.req);
     pending.socket = socket; // track socket for cleanup
 
     // Buffer chunks to collect complete output
@@ -437,7 +439,12 @@ app.post("/api/v1/codex/execute", async (req, reply) => {
 
   const { model, prompt } = parsed.data;
   try {
-    const res = await codexAdapter.executeSync(parsed.data as any);
+    // allow per-request backend override via header `x-codex-backend` or body.metadata.backend
+    const headerOverride = (req.headers["x-codex-backend"] as string) || undefined;
+    const bodyOverride = parsed.data.metadata?.backend as string | undefined;
+    const override = (headerOverride || bodyOverride || "").toLowerCase();
+    const adapterToUse = override === "cli" ? cliAdapter : codexAdapter;
+    const res = await adapterToUse.executeSync(parsed.data as any);
     store.addLog({ level: "info", category: "codex", message: `execute ${model}`, requestId: res.id });
     return { id: res.id, output: res.output };
   } catch (e: any) {

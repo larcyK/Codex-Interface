@@ -22,6 +22,12 @@ export interface CodexAdapter {
 
 const cliAdapter = new CliCodexAdapter();
 
+export const getAdapterByName = (name?: string) => {
+  const raw = (name ?? "").toLowerCase();
+  if (raw === "cli") return cliAdapter;
+  return getCodexAdapter();
+};
+
 export const getCodexBackendName = (): "mock" | "cli" => {
   const raw = (process.env.CODEX_BACKEND ?? "mock").toLowerCase();
   return raw === "cli" ? "cli" : "mock";
@@ -30,3 +36,5 @@ export const getCodexBackendName = (): "mock" | "cli" => {
 export const getCodexAdapter = (): CodexAdapter => {
   return getCodexBackendName() === "cli" ? cliAdapter : mockCodex;
 };
+
+export { cliAdapter };
