@@ -124,3 +124,55 @@ ul {
   word-break: break-word;
   overflow-wrap: anywhere;
 }
+
+/* Chat area and bubbles */
+.chat-area {
+  border: 1px solid #e2e8f0;
+  padding: 12px;
+  border-radius: 8px;
+  max-height: 360px;
+  overflow: auto;
+  background: #ffffff;
+  margin-bottom: 8px;
+}
+.chat-message {
+  margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+}
+.chat-meta {
+  font-size: 0.85rem;
+  color: #334155;
+  margin-bottom: 6px;
+}
+.chat-bubble {
+  display: inline-block;
+  max-width: 85%;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: #f1f5f9;
+}
+.chat-message.user .chat-bubble {
+  margin-left: auto;
+  background: linear-gradient(180deg,#e6f0ff,#dbeafe);
+}
+.chat-message.assistant .chat-bubble {
+  margin-right: auto;
+  background: #f8fafc;
+}
+.chat-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+/* Tweak send row */
+.row input {
+  padding: 10px 12px;
+  border-radius: 999px;
+}
+.row button {
+  height: 40px;
+  align-self: center;
+  border-radius: 999px;
+}

@@ -513,16 +513,18 @@ export default function App() {
       <section className="card">
         <h2>Codex ストリーミング</h2>
         <h3>チャット</h3>
-        <div style={{ border: "1px solid #ddd", padding: 8, maxHeight: 300, overflow: "auto", marginBottom: 8 }}>
+        <div className="chat-area">
           {messages.map((m) => (
-            <div key={m.id} style={{ marginBottom: 8 }}>
-              <div style={{ fontWeight: "bold" }}>{m.role === "user" ? "You" : "Codex"} {m.status === "streaming" ? "(typing...)" : ""}</div>
-              <div style={{ whiteSpace: "pre-wrap", wordBreak: "break-word", overflowWrap: "anywhere", maxWidth: "100%" }}>
-                {ReactMarkdown ? (
-                  <ReactMarkdown remarkPlugins={remarkGfm ? [remarkGfm] : []}>{m.text}</ReactMarkdown>
-                ) : (
-                  m.text
-                )}
+            <div key={m.id} className={`chat-message ${m.role === "user" ? "user" : "assistant"}`}>
+              <div className="chat-meta"><strong>{m.role === "user" ? "You" : "Codex"}</strong> {m.status === "streaming" ? "(typing...)" : ""}</div>
+              <div className="chat-bubble">
+                <div className="chat-text">
+                  {ReactMarkdown ? (
+                    <ReactMarkdown remarkPlugins={remarkGfm ? [remarkGfm] : []}>{m.text}</ReactMarkdown>
+                  ) : (
+                    m.text
+                  )}
+                </div>
               </div>
             </div>
           ))}
