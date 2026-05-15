@@ -35,9 +35,12 @@ git commit -m "<scope>: <短い説明>"
 - 依存インストール: `npm install`
 - ビルド: `npm run build`
 - **開発起動（ユーザー操作）**:
-  - `npm run dev:gateway` ← ユーザーが実行（自動ポート清掃含む）
-  - `npm run dev:mobile` ← ユーザーが実行（自動ポート清掃含む）
+  - `npm run dev:gateway` ← ユーザーが実行（既起動サーバーを使用）
+  - `npm run dev:mobile` ← ユーザーが実行（既起動サーバーを使用）
   - 私は既起動サーバーを使用、新規起動が必要な場合はユーザーに依頼
+- **ポート清掃（必要に応じて手動実行）**:
+  - `npm run dev:clean` ← ポート競合時にユーザーが実行（gateway & vite プロセス終了）
+  - その後 `npm run dev:gateway` や `npm run dev:mobile` で再起動
 - **テスト簡略化**:
   - `npm run test:quick` ← 開発中（スキップ）
   - `npm run test:full` ← 機能完成・リリース前のみ
