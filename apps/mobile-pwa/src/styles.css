@@ -76,3 +76,51 @@ ul {
     padding: 10px;
   }
 }
+
+/* Markdown rendering styles */
+.app h1, .app h2, .app h3, .app h4 {
+  margin: 8px 0 6px;
+}
+.app p {
+  margin: 6px 0;
+  line-height: 1.5;
+}
+.app pre {
+  background: #0b1220;
+  color: #e6eef8;
+  padding: 12px;
+  border-radius: 8px;
+  overflow: auto;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 0.95rem;
+}
+.app code {
+  background: rgba(15,23,42,0.06);
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+.app blockquote {
+  border-left: 4px solid #cbd5e1;
+  padding-left: 12px;
+  color: #334155;
+  margin: 8px 0;
+}
+.app table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0;
+}
+.app th, .app td {
+  border: 1px solid #cbd5e1;
+  padding: 8px;
+  text-align: left;
+}
+.app thead th {
+  background: #f1f5f9;
+}
+
+/* Ensure long inline links and words don't break layout */
+.app a, .app p, .app li {
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
