@@ -165,6 +165,20 @@ ul {
   word-break: break-word;
   overflow-wrap: anywhere;
 }
+.chat-text > :first-child {
+  margin-top: 0;
+}
+.chat-text > :last-child {
+  margin-bottom: 0;
+}
+.chat-streaming {
+  background: transparent !important;
+  color: inherit;
+  padding: 0 !important;
+  border-radius: 0;
+  overflow: visible;
+  font-size: inherit;
+}
 
 /* Tweak send row */
 .row input {
