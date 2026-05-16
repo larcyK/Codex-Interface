@@ -2,11 +2,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 export const useXtermTerminal = () => {
-    const terminalHostRef = useRef(null);
+    const [terminalHost, setTerminalHost] = useState(null);
     const terminalRef = useRef(null);
     const fitAddonRef = useRef(null);
     const transcriptRef = useRef("");
     const [streamOutput, setStreamOutput] = useState("");
+    const terminalHostRef = useCallback((node) => {
+        setTerminalHost(node);
+    }, []);
     const appendTerminal = useCallback((text) => {
         transcriptRef.current += text;
         setStreamOutput(transcriptRef.current);
@@ -29,7 +32,7 @@ export const useXtermTerminal = () => {
         fitAddonRef.current?.fit();
     }, []);
     useEffect(() => {
-        if (!terminalHostRef.current)
+        if (!terminalHost || terminalRef.current)
             return;
         const fitAddon = new FitAddon();
         const term = new Terminal({
@@ -47,7 +50,7 @@ export const useXtermTerminal = () => {
             },
         });
         term.loadAddon(fitAddon);
-        term.open(terminalHostRef.current);
+        term.open(terminalHost);
         fitAddon.fit();
         term.writeln("Codex terminal ready.");
         term.writeln("");
@@ -61,7 +64,7 @@ export const useXtermTerminal = () => {
             terminalRef.current = null;
             fitAddonRef.current = null;
         };
-    }, []);
+    }, [terminalHost]);
     return {
         terminalHostRef,
         streamOutput,

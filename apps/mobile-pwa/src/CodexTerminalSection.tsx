@@ -1,4 +1,4 @@
-import type { RefObject } from "react";
+import type { RefCallback } from "react";
 import { parseAnsiLine, type TerminalBlock } from "./terminalTranscript";
 
 type Props = {
@@ -6,7 +6,7 @@ type Props = {
   terminalView: "compact" | "split" | "raw";
   setTerminalView: (view: "compact" | "split" | "raw") => void;
   compactBlocks: TerminalBlock[];
-  terminalHostRef: RefObject<HTMLDivElement>;
+  terminalHostRef: RefCallback<HTMLDivElement>;
   chatInput: string;
   setChatInput: (value: string) => void;
   token: string;
