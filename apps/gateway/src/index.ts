@@ -13,6 +13,7 @@ import {
   verifyPin,
 } from "./auth.js";
 import { getCodexAdapter, getCodexBackendName, cliAdapter } from "./codex-adapter.js";
+import { listWorkspaceDirectory, readWorkspaceFile } from "./file-browser.js";
 import { JsonStore } from "./store.js";
 import { SqliteStore } from "./store-sqlite.js";
 
@@ -262,6 +263,54 @@ app.get("/api/v1/logs", async (req) => {
   const limit = Number(query.limit ?? "50");
   const res = store.getLogs(query.cursor, limit);
   return { items: res.items, nextCursor: res.nextCursor };
+});
+
+app.get("/api/v1/files", async (req, reply) => {
+  const auth = req.headers.authorization;
+  if (!auth?.startsWith("Bearer ")) {
+    return reply.code(401).send({ error: { code: "UNAUTHORIZED", message: "Missing token" } });
+  }
+  try {
+    await verifyAccessToken(auth.slice("Bearer ".length));
+  } catch {
+    return reply.code(401).send({ error: { code: "UNAUTHORIZED", message: "Token invalid" } });
+  }
+
+  const query = req.query as { path?: string };
+  try {
+    return await listWorkspaceDirectory(query.path);
+  } catch (error: any) {
+    return reply.code(400).send({
+      error: {
+        code: "FILE_BROWSE_FAILED",
+        message: error?.message ?? "Failed to list directory",
+      },
+    });
+  }
+});
+
+app.get("/api/v1/files/content", async (req, reply) => {
+  const auth = req.headers.authorization;
+  if (!auth?.startsWith("Bearer ")) {
+    return reply.code(401).send({ error: { code: "UNAUTHORIZED", message: "Missing token" } });
+  }
+  try {
+    await verifyAccessToken(auth.slice("Bearer ".length));
+  } catch {
+    return reply.code(401).send({ error: { code: "UNAUTHORIZED", message: "Token invalid" } });
+  }
+
+  const query = req.query as { path?: string };
+  try {
+    return await readWorkspaceFile(query.path);
+  } catch (error: any) {
+    return reply.code(400).send({
+      error: {
+        code: "FILE_READ_FAILED",
+        message: error?.message ?? "Failed to read file",
+      },
+    });
+  }
 });
 
 const wss = new WebSocketServer({ port: wsPort, path: "/ws" });

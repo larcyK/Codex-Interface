@@ -1,1 +1,1 @@
-{"root":["./src/app.tsx","./src/main.tsx","./src/tokenstorage.ts","./src/useautoreconnect.ts"],"version":"5.9.3"}
+{"root":["./src/app.tsx","./src/codexterminalsection.tsx","./src/filebrowsersection.tsx","./src/main.tsx","./src/terminaltranscript.ts","./src/tokenstorage.ts","./src/useautoreconnect.ts","./src/usextermterminal.ts"],"version":"5.9.3"}

@@ -5,6 +5,7 @@ import { clearTokens, getTokens, saveTokens } from "./tokenStorage";
 import { buildTerminalBlocks } from "./terminalTranscript";
 import { useXtermTerminal } from "./useXtermTerminal";
 import { CodexTerminalSection } from "./CodexTerminalSection";
+import { FileBrowserSection } from "./FileBrowserSection";
 
 type LogItem = {
   id: string;
@@ -61,6 +62,28 @@ export default function App() {
   const [chatInput, setChatInput] = useState("");
   const [terminalStatus, setTerminalStatus] = useState("ready");
   const [terminalView, setTerminalView] = useState<"compact" | "split" | "raw">("compact");
+  const [browserData, setBrowserData] = useState<{
+    rootPath: string;
+    currentPath: string;
+    parentPath: string | null;
+    entries: Array<{
+      name: string;
+      path: string;
+      type: "file" | "directory";
+      size: number;
+      modifiedAt: string;
+    }>;
+  } | null>(null);
+  const [selectedFile, setSelectedFile] = useState<{
+    path: string;
+    size: number;
+    modifiedAt: string;
+    truncated: boolean;
+    content: string;
+  } | null>(null);
+  const [browserError, setBrowserError] = useState("");
+  const [isBrowsing, setIsBrowsing] = useState(false);
+  const [isLoadingFile, setIsLoadingFile] = useState(false);
 
   const wsRef = useMemo(() => ({ ws: null as WebSocket | null }), []);
   const isStreamingRef = useRef(false);
@@ -261,6 +284,42 @@ export default function App() {
     }
   };
 
+  const browseFiles = useCallback(async (path = "") => {
+    setIsBrowsing(true);
+    setBrowserError("");
+    try {
+      const query = path ? `?path=${encodeURIComponent(path)}` : "";
+      const res = await api.get(`/files${query}`, true);
+      if (res?.error) {
+        setBrowserError(res.error.message ?? "ファイル一覧の取得に失敗しました");
+        return;
+      }
+      setBrowserData(res);
+      setSelectedFile((prev) => {
+        if (!prev) return prev;
+        const stillVisible = (res.entries ?? []).some((entry: { path: string }) => entry.path === prev.path);
+        return stillVisible ? prev : null;
+      });
+    } finally {
+      setIsBrowsing(false);
+    }
+  }, [api]);
+
+  const openFilePreview = useCallback(async (path: string) => {
+    setIsLoadingFile(true);
+    setBrowserError("");
+    try {
+      const res = await api.get(`/files/content?path=${encodeURIComponent(path)}`, true);
+      if (res?.error) {
+        setBrowserError(res.error.message ?? "ファイルの読み込みに失敗しました");
+        return;
+      }
+      setSelectedFile(res);
+    } finally {
+      setIsLoadingFile(false);
+    }
+  }, [api]);
+
   const loadStreamDetail = async (streamId: string) => {
     const res = await api.get(`/codex/history/${streamId}`, true);
     if (res && !res.error) {
@@ -418,6 +477,16 @@ export default function App() {
 
   const wsConnected = useAutoReconnect(wsHost, token, handleWsEvent);
 
+  useEffect(() => {
+    if (!token) {
+      setBrowserData(null);
+      setSelectedFile(null);
+      setBrowserError("");
+      return;
+    }
+    void browseFiles("");
+  }, [browseFiles, token]);
+
   return (
     <main className="app">
       <h1>Codex Interface Mobile</h1>
@@ -515,6 +584,18 @@ export default function App() {
         setPromptInput={setPromptInput}
         startCodexStream={startCodexStream}
         fetchStreamHistory={fetchStreamHistory}
+      />
+
+      <FileBrowserSection
+        browserData={browserData}
+        selectedFile={selectedFile}
+        browserError={browserError}
+        isBrowsing={isBrowsing}
+        isLoadingFile={isLoadingFile}
+        onRefresh={() => browseFiles(browserData?.currentPath ?? "")}
+        onOpenDirectory={browseFiles}
+        onOpenParent={() => browseFiles(browserData?.parentPath ?? "")}
+        onOpenFile={openFilePreview}
       />
 
       <section className="card">
