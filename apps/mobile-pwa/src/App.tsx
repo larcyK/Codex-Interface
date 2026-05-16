@@ -12,7 +12,68 @@ type LogItem = {
   message: string;
 };
 
+type TerminalBlockKind = "meta" | "thinking" | "output";
+
+type TerminalBlock = {
+  id: string;
+  kind: TerminalBlockKind;
+  title: string;
+  content: string;
+  lineCount: number;
+  defaultOpen: boolean;
+};
+
 const API_PREFIX = "/api/v1";
+const ANSI_ESCAPE_RE = /\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g;
+const META_LINE_RE = /^\[(local|ws open|ws closed|done|error|raw|connect failed|cancel requested|ws error)\]/i;
+const HEADER_LINE_RE = /^(OpenAI Codex|Model:|Directory:|Safety:|Session:|Permission mode:)/i;
+const THINKING_LINE_RE = /^(thinking|reasoning|analysis|plan|searching|reading|inspecting|editing|running|patching|diffing|tool\b)/i;
+
+const stripAnsi = (text: string) => text.replace(ANSI_ESCAPE_RE, "");
+
+const getBlockKind = (line: string, currentKind: TerminalBlockKind | null): TerminalBlockKind => {
+  const trimmed = line.trim();
+  if (!trimmed) {
+    return currentKind ?? "meta";
+  }
+  if (META_LINE_RE.test(trimmed) || HEADER_LINE_RE.test(trimmed)) {
+    return "meta";
+  }
+  if (THINKING_LINE_RE.test(trimmed)) {
+    return "thinking";
+  }
+  if (currentKind === "thinking" && !META_LINE_RE.test(trimmed)) {
+    return "thinking";
+  }
+  return "output";
+};
+
+const buildTerminalBlock = (kind: TerminalBlockKind, lines: string[], index: number): TerminalBlock => {
+  const content = lines.join("\n").trimEnd();
+  const lineCount = lines.filter((line) => line.trim().length > 0).length || 1;
+  const firstLine = lines.find((line) => line.trim().length > 0)?.trim() ?? "";
+
+  let title = "Output";
+  let defaultOpen = true;
+  if (kind === "meta") {
+    title = firstLine.startsWith("[error]") ? "Transport / status errors" : "Session / transport log";
+    defaultOpen = false;
+  } else if (kind === "thinking") {
+    title = "Reasoning / work log";
+    defaultOpen = false;
+  } else if (firstLine.startsWith("OpenAI Codex")) {
+    title = "CLI banner";
+  }
+
+  return {
+    id: `${kind}-${index}`,
+    kind,
+    title,
+    content,
+    lineCount,
+    defaultOpen,
+  };
+};
 
 export default function App() {
   const [host, setHost] = useState(() => {
@@ -60,6 +121,7 @@ export default function App() {
   } | null>(null);
   const [chatInput, setChatInput] = useState("");
   const [terminalStatus, setTerminalStatus] = useState("ready");
+  const [terminalView, setTerminalView] = useState<"compact" | "split" | "raw">("compact");
 
   const wsRef = useMemo(() => ({ ws: null as WebSocket | null }), []);
   const terminalHostRef = useRef<HTMLDivElement | null>(null);
@@ -91,6 +153,38 @@ export default function App() {
       terminalRef.current.clear();
     }
   }, []);
+
+  const compactBlocks = useMemo(() => {
+    const normalized = stripAnsi(streamOutput).replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
+    if (!normalized) {
+      return [] as TerminalBlock[];
+    }
+
+    const lines = normalized.split("\n");
+    const blocks: TerminalBlock[] = [];
+    let currentKind: TerminalBlockKind | null = null;
+    let currentLines: string[] = [];
+
+    const flush = () => {
+      if (currentKind && currentLines.length > 0) {
+        blocks.push(buildTerminalBlock(currentKind, currentLines, blocks.length));
+      }
+      currentKind = null;
+      currentLines = [];
+    };
+
+    for (const line of lines) {
+      const nextKind = getBlockKind(line, currentKind);
+      if (currentKind && nextKind !== currentKind && line.trim()) {
+        flush();
+      }
+      currentKind = nextKind;
+      currentLines.push(line);
+    }
+
+    flush();
+    return blocks;
+  }, [streamOutput]);
 
   useEffect(() => {
     if (!terminalHostRef.current) return;
@@ -545,9 +639,39 @@ export default function App() {
       <section className="card">
         <h2>Codex Terminal</h2>
         <p className="mono">status: {terminalStatus}</p>
-        <div className="terminal-frame">
-          <div ref={terminalHostRef} className="terminal-host" />
+        <div className="row terminal-view-toggle">
+          <button className={terminalView === "compact" ? "is-active" : ""} onClick={() => setTerminalView("compact")}>
+            Compact
+          </button>
+          <button className={terminalView === "split" ? "is-active" : ""} onClick={() => setTerminalView("split")}>
+            Split
+          </button>
+          <button className={terminalView === "raw" ? "is-active" : ""} onClick={() => setTerminalView("raw")}>
+            Raw Terminal
+          </button>
         </div>
+        {(terminalView === "compact" || terminalView === "split") && (
+          <div className="terminal-compact">
+            {compactBlocks.length === 0 ? (
+              <p className="mono terminal-empty">No transcript yet.</p>
+            ) : (
+              compactBlocks.map((block) => (
+                <details key={block.id} className={`terminal-block terminal-block-${block.kind}`} open={block.defaultOpen}>
+                  <summary>
+                    <span>{block.title}</span>
+                    <span className="mono terminal-block-meta">{block.lineCount} lines</span>
+                  </summary>
+                  <pre className="mono terminal-block-content">{block.content}</pre>
+                </details>
+              ))
+            )}
+          </div>
+        )}
+        {(terminalView === "raw" || terminalView === "split") && (
+          <div className="terminal-frame">
+            <div ref={terminalHostRef} className="terminal-host" />
+          </div>
+        )}
         <div className="row terminal-actions">
           <input
             style={{ flex: 1 }}
