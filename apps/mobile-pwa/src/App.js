@@ -7,14 +7,84 @@ import { useAutoReconnect } from "./useAutoReconnect";
 import { clearTokens, getTokens, saveTokens } from "./tokenStorage";
 const API_PREFIX = "/api/v1";
 const ANSI_ESCAPE_RE = /\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g;
+const ANSI_SGR_RE = /\x1b\[([0-9;]*)m/g;
 const META_LINE_RE = /^\[(local|ws open|ws closed|done|error|raw|connect failed|cancel requested|ws error)\]/i;
 const HEADER_LINE_RE = /^(OpenAI Codex|Model:|Directory:|Safety:|Session:|Permission mode:)/i;
 const SESSION_INFO_LINE_RE = /^(provider:|approval:|sandbox:|reasoning effort:|reasoning summaries:|session id:)/i;
 const ROLE_LINE_RE = /^(user|assistant|codex)$/i;
 const THINKING_LINE_RE = /^(thinking|reasoning|analysis|plan|searching|reading|inspecting|editing|running|patching|diffing|tool\b)/i;
+const ANSI_FG_CLASS = {
+    30: "ansi-fg-black",
+    31: "ansi-fg-red",
+    32: "ansi-fg-green",
+    33: "ansi-fg-yellow",
+    34: "ansi-fg-blue",
+    35: "ansi-fg-magenta",
+    36: "ansi-fg-cyan",
+    37: "ansi-fg-white",
+    90: "ansi-fg-bright-black",
+    91: "ansi-fg-bright-red",
+    92: "ansi-fg-bright-green",
+    93: "ansi-fg-bright-yellow",
+    94: "ansi-fg-bright-blue",
+    95: "ansi-fg-bright-magenta",
+    96: "ansi-fg-bright-cyan",
+    97: "ansi-fg-bright-white",
+};
 const stripAnsi = (text) => text.replace(ANSI_ESCAPE_RE, "");
+const applyAnsiCode = (state, code) => {
+    if (code === 0) {
+        return { fg: null, bold: false, dim: false };
+    }
+    if (code === 1) {
+        return { ...state, bold: true, dim: false };
+    }
+    if (code === 2) {
+        return { ...state, dim: true, bold: false };
+    }
+    if (code === 22) {
+        return { ...state, bold: false, dim: false };
+    }
+    if (code === 39) {
+        return { ...state, fg: null };
+    }
+    if (code in ANSI_FG_CLASS) {
+        return { ...state, fg: ANSI_FG_CLASS[code] };
+    }
+    return state;
+};
+const parseAnsiLine = (line) => {
+    const spans = [];
+    let state = { fg: null, bold: false, dim: false };
+    let lastIndex = 0;
+    for (const match of line.matchAll(ANSI_SGR_RE)) {
+        const index = match.index ?? 0;
+        if (index > lastIndex) {
+            const text = line.slice(lastIndex, index);
+            const classes = [state.fg, state.bold ? "ansi-bold" : "", state.dim ? "ansi-dim" : ""].filter(Boolean).join(" ");
+            spans.push({ text, className: classes });
+        }
+        const codes = (match[1] || "0")
+            .split(";")
+            .map((part) => Number(part || "0"))
+            .filter((code) => Number.isFinite(code));
+        for (const code of codes) {
+            state = applyAnsiCode(state, code);
+        }
+        lastIndex = index + match[0].length;
+    }
+    if (lastIndex < line.length) {
+        const text = line.slice(lastIndex);
+        const classes = [state.fg, state.bold ? "ansi-bold" : "", state.dim ? "ansi-dim" : ""].filter(Boolean).join(" ");
+        spans.push({ text, className: classes });
+    }
+    if (spans.length === 0) {
+        spans.push({ text: stripAnsi(line), className: "" });
+    }
+    return spans;
+};
 const getBlockKind = (line, currentKind) => {
-    const trimmed = line.trim();
+    const trimmed = stripAnsi(line).trim();
     if (!trimmed) {
         return currentKind ?? "meta";
     }
@@ -34,8 +104,8 @@ const getBlockKind = (line, currentKind) => {
 };
 const buildTerminalBlock = (kind, lines, index) => {
     const content = lines.join("\n").trimEnd();
-    const lineCount = lines.filter((line) => line.trim().length > 0).length || 1;
-    const firstLine = lines.find((line) => line.trim().length > 0)?.trim() ?? "";
+    const lineCount = lines.filter((line) => stripAnsi(line).trim().length > 0).length || 1;
+    const firstLine = lines.find((line) => stripAnsi(line).trim().length > 0)?.trim() ?? "";
     let title = "Output";
     let defaultOpen = true;
     if (kind === "meta") {
@@ -118,7 +188,7 @@ export default function App() {
         }
     }, []);
     const compactBlocks = useMemo(() => {
-        const normalized = stripAnsi(streamOutput).replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
+        const normalized = streamOutput.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
         if (!normalized) {
             return [];
         }
@@ -496,5 +566,5 @@ export default function App() {
                                                 setHost(`http://${d.ip}:8000`);
                                                 if (d.wsUrl)
                                                     setWsHost(d.wsUrl);
-                                            }, children: "\u63A5\u7D9A" })] }, i))) })] })), _jsx("button", { onClick: checkHealth, children: "Health\u78BA\u8A8D" }), _jsxs("p", { children: ["\u72B6\u614B: ", health] })] }), _jsxs("section", { className: "card", children: [_jsx("h2", { children: "\u8A8D\u8A3C" }), _jsxs("label", { children: ["Device Name", _jsx("input", { value: deviceName, onChange: (e) => setDeviceName(e.target.value) })] }), _jsxs("label", { children: ["PIN", _jsx("input", { value: pin, onChange: (e) => setPin(e.target.value), type: "password" })] }), _jsxs("div", { className: "row", children: [_jsx("button", { onClick: login, children: "PIN\u30ED\u30B0\u30A4\u30F3" }), _jsx("button", { onClick: logout, children: "\u30ED\u30B0\u30A2\u30A6\u30C8" })] }), _jsxs("p", { className: "mono", children: ["Token: ", token ? `${token.slice(0, 24)}...` : "未取得"] }), _jsxs("p", { className: "mono", children: ["RefreshToken: ", refreshToken ? "保存済" : "なし"] }), _jsxs("p", { className: "mono", children: ["WS: ", wsConnected ? "✓接続中" : "✗切断"] })] }), _jsxs("section", { className: "card", children: [_jsx("h2", { children: "\u30BB\u30C3\u30B7\u30E7\u30F3/\u30B3\u30DE\u30F3\u30C9" }), _jsxs("div", { className: "row", children: [_jsx("button", { onClick: startSession, children: "\u30BB\u30C3\u30B7\u30E7\u30F3\u958B\u59CB" }), _jsx("button", { onClick: closeSession, children: "\u30BB\u30C3\u30B7\u30E7\u30F3\u7D42\u4E86" })] }), _jsxs("p", { className: "mono", children: ["Session: ", sessionId || "なし"] }), _jsxs("label", { children: ["Command", _jsx("input", { value: command, onChange: (e) => setCommand(e.target.value) })] }), _jsx("button", { onClick: runCommand, children: "\u5B9F\u884C" }), _jsxs("p", { className: "mono", children: ["\u7D50\u679C: ", commandResult] })] }), _jsxs("section", { className: "card", children: [_jsx("h2", { children: "Codex Terminal" }), _jsxs("p", { className: "mono", children: ["status: ", terminalStatus] }), _jsxs("div", { className: "row terminal-view-toggle", children: [_jsx("button", { className: terminalView === "compact" ? "is-active" : "", onClick: () => setTerminalView("compact"), children: "Compact" }), _jsx("button", { className: terminalView === "split" ? "is-active" : "", onClick: () => setTerminalView("split"), children: "Split" }), _jsx("button", { className: terminalView === "raw" ? "is-active" : "", onClick: () => setTerminalView("raw"), children: "Raw Terminal" })] }), (terminalView === "compact" || terminalView === "split") && (_jsx("div", { className: "terminal-compact", children: compactBlocks.length === 0 ? (_jsx("p", { className: "mono terminal-empty", children: "No transcript yet." })) : (compactBlocks.map((block) => (_jsxs("details", { className: `terminal-block terminal-block-${block.kind}`, open: block.defaultOpen, children: [_jsxs("summary", { children: [_jsx("span", { children: block.title }), _jsxs("span", { className: "mono terminal-block-meta", children: [block.lineCount, " lines"] })] }), _jsx("pre", { className: "mono terminal-block-content", children: block.content })] }, block.id)))) })), (terminalView === "raw" || terminalView === "split") && (_jsx("div", { className: "terminal-frame", children: _jsx("div", { ref: terminalHostRef, className: "terminal-host" }) })), _jsxs("div", { className: "row terminal-actions", children: [_jsx("input", { style: { flex: 1 }, value: chatInput, onChange: (e) => setChatInput(e.target.value), placeholder: "Send a prompt to Codex..." }), _jsx("button", { onClick: sendChatMessage, disabled: !token || !chatInput.trim() || isStreaming, children: "Send" }), _jsx("button", { onClick: cancelCodexStream, disabled: !isStreaming, children: "Cancel" }), _jsx("button", { onClick: clearTerminalView, children: "Clear" })] }), _jsxs("label", { children: ["Model", _jsx("input", { value: modelInput, onChange: (e) => setModelInput(e.target.value) })] }), _jsxs("label", { children: ["Backend", _jsxs("select", { value: backendChoice, onChange: (e) => setBackendChoice(e.target.value), children: [_jsx("option", { value: "cli", children: "cli" }), _jsx("option", { value: "mock", children: "mock" })] })] }), _jsxs("label", { children: ["Prompt", _jsx("input", { value: promptInput, onChange: (e) => setPromptInput(e.target.value) })] }), _jsxs("div", { className: "row", children: [_jsx("button", { onClick: startCodexStream, disabled: isStreaming, children: "Run Prompt" }), _jsx("button", { onClick: fetchStreamHistory, children: "\u5C65\u6B74\u3092\u53D6\u5F97" })] })] }), _jsxs("section", { className: "card", children: [_jsx("h2", { children: "\u30ED\u30B0" }), _jsx("button", { onClick: fetchLogs, children: "\u6700\u65B0\u53D6\u5F97" }), _jsx("ul", { children: logs.map((l) => (_jsxs("li", { children: [l.timestamp, " [", l.level, "] ", l.message] }, l.id))) })] }), _jsxs("section", { className: "card", children: [_jsx("h2", { children: "WS\u30A4\u30D9\u30F3\u30C8" }), _jsx("div", { className: "row", children: _jsx("button", { onClick: () => setEvents([]), children: "\u30AF\u30EA\u30A2" }) }), _jsx("ul", { className: "mono", children: events.map((e, i) => (_jsx("li", { children: e }, `${i}_${e.slice(0, 8)}`))) })] }), _jsxs("section", { className: "card", children: [_jsx("h2", { children: "Codex \u30B9\u30C8\u30EA\u30FC\u30E0\u5C65\u6B74" }), _jsxs("div", { className: "row", children: [_jsx("button", { onClick: fetchStreamHistory, children: "\u5C65\u6B74\u3092\u53D6\u5F97" }), _jsx("button", { onClick: () => setSelectedStream(null), children: "\u30AF\u30EA\u30A2" })] }), streamHistory.length > 0 && (_jsxs("div", { children: [_jsx("h3", { children: "\u904E\u53BB\u306E\u30B9\u30C8\u30EA\u30FC\u30E0" }), _jsx("ul", { children: streamHistory.map((s) => (_jsxs("li", { children: [_jsx("strong", { children: s.model }), " ", new Date(s.createdAt).toLocaleString(), " ", _jsx("button", { onClick: () => loadStreamDetail(s.streamId), children: "\u8A73\u7D30" })] }, s.streamId))) })] })), selectedStream && (_jsxs("div", { className: "card", style: { marginTop: 16, backgroundColor: "#f5f5f5" }, children: [_jsx("h3", { children: "\u30B9\u30C8\u30EA\u30FC\u30E0\u8A73\u7D30" }), _jsxs("p", { children: [_jsx("strong", { children: "Model:" }), " ", selectedStream.model] }), _jsxs("p", { children: [_jsx("strong", { children: "Device:" }), " ", selectedStream.deviceId] }), _jsxs("p", { children: [_jsx("strong", { children: "Created:" }), " ", new Date(selectedStream.createdAt).toLocaleString()] }), _jsx("p", { children: _jsx("strong", { children: "Prompt:" }) }), _jsx("pre", { className: "mono terminal-history", children: selectedStream.prompt }), _jsx("p", { children: _jsx("strong", { children: "Output:" }) }), _jsx("pre", { className: "mono terminal-history", children: selectedStream.output })] }))] })] }));
+                                            }, children: "\u63A5\u7D9A" })] }, i))) })] })), _jsx("button", { onClick: checkHealth, children: "Health\u78BA\u8A8D" }), _jsxs("p", { children: ["\u72B6\u614B: ", health] })] }), _jsxs("section", { className: "card", children: [_jsx("h2", { children: "\u8A8D\u8A3C" }), _jsxs("label", { children: ["Device Name", _jsx("input", { value: deviceName, onChange: (e) => setDeviceName(e.target.value) })] }), _jsxs("label", { children: ["PIN", _jsx("input", { value: pin, onChange: (e) => setPin(e.target.value), type: "password" })] }), _jsxs("div", { className: "row", children: [_jsx("button", { onClick: login, children: "PIN\u30ED\u30B0\u30A4\u30F3" }), _jsx("button", { onClick: logout, children: "\u30ED\u30B0\u30A2\u30A6\u30C8" })] }), _jsxs("p", { className: "mono", children: ["Token: ", token ? `${token.slice(0, 24)}...` : "未取得"] }), _jsxs("p", { className: "mono", children: ["RefreshToken: ", refreshToken ? "保存済" : "なし"] }), _jsxs("p", { className: "mono", children: ["WS: ", wsConnected ? "✓接続中" : "✗切断"] })] }), _jsxs("section", { className: "card", children: [_jsx("h2", { children: "\u30BB\u30C3\u30B7\u30E7\u30F3/\u30B3\u30DE\u30F3\u30C9" }), _jsxs("div", { className: "row", children: [_jsx("button", { onClick: startSession, children: "\u30BB\u30C3\u30B7\u30E7\u30F3\u958B\u59CB" }), _jsx("button", { onClick: closeSession, children: "\u30BB\u30C3\u30B7\u30E7\u30F3\u7D42\u4E86" })] }), _jsxs("p", { className: "mono", children: ["Session: ", sessionId || "なし"] }), _jsxs("label", { children: ["Command", _jsx("input", { value: command, onChange: (e) => setCommand(e.target.value) })] }), _jsx("button", { onClick: runCommand, children: "\u5B9F\u884C" }), _jsxs("p", { className: "mono", children: ["\u7D50\u679C: ", commandResult] })] }), _jsxs("section", { className: "card", children: [_jsx("h2", { children: "Codex Terminal" }), _jsxs("p", { className: "mono", children: ["status: ", terminalStatus] }), _jsxs("div", { className: "row terminal-view-toggle", children: [_jsx("button", { className: terminalView === "compact" ? "is-active" : "", onClick: () => setTerminalView("compact"), children: "Compact" }), _jsx("button", { className: terminalView === "split" ? "is-active" : "", onClick: () => setTerminalView("split"), children: "Split" }), _jsx("button", { className: terminalView === "raw" ? "is-active" : "", onClick: () => setTerminalView("raw"), children: "Raw Terminal" })] }), (terminalView === "compact" || terminalView === "split") && (_jsx("div", { className: "terminal-compact", children: compactBlocks.length === 0 ? (_jsx("p", { className: "mono terminal-empty", children: "No transcript yet." })) : (compactBlocks.map((block) => (_jsxs("details", { className: `terminal-block terminal-block-${block.kind}`, open: block.defaultOpen, children: [_jsxs("summary", { children: [_jsx("span", { children: block.title }), _jsxs("span", { className: "mono terminal-block-meta", children: [block.lineCount, " lines"] })] }), _jsx("pre", { className: "mono terminal-block-content", children: block.content.split("\n").map((line, lineIndex) => (_jsxs("span", { className: "terminal-block-line", children: [parseAnsiLine(line).map((span, spanIndex) => (_jsx("span", { className: span.className, children: span.text }, `${block.id}-${lineIndex}-${spanIndex}`))), lineIndex < block.content.split("\n").length - 1 ? "\n" : ""] }, `${block.id}-${lineIndex}`))) })] }, block.id)))) })), (terminalView === "raw" || terminalView === "split") && (_jsxs("div", { className: "terminal-frame", children: [_jsxs("div", { className: "terminal-chrome", children: [_jsxs("div", { className: "terminal-lights", "aria-hidden": "true", children: [_jsx("span", { className: "terminal-light terminal-light-close" }), _jsx("span", { className: "terminal-light terminal-light-minimize" }), _jsx("span", { className: "terminal-light terminal-light-expand" })] }), _jsx("div", { className: "terminal-title mono", children: "codex / interactive stream" }), _jsx("div", { className: "terminal-shell mono", children: "zsh" })] }), _jsx("div", { ref: terminalHostRef, className: "terminal-host" })] })), _jsxs("div", { className: "row terminal-actions", children: [_jsx("input", { style: { flex: 1 }, value: chatInput, onChange: (e) => setChatInput(e.target.value), placeholder: "Send a prompt to Codex..." }), _jsx("button", { onClick: sendChatMessage, disabled: !token || !chatInput.trim() || isStreaming, children: "Send" }), _jsx("button", { onClick: cancelCodexStream, disabled: !isStreaming, children: "Cancel" }), _jsx("button", { onClick: clearTerminalView, children: "Clear" })] }), _jsxs("label", { children: ["Model", _jsx("input", { value: modelInput, onChange: (e) => setModelInput(e.target.value) })] }), _jsxs("label", { children: ["Backend", _jsxs("select", { value: backendChoice, onChange: (e) => setBackendChoice(e.target.value), children: [_jsx("option", { value: "cli", children: "cli" }), _jsx("option", { value: "mock", children: "mock" })] })] }), _jsxs("label", { children: ["Prompt", _jsx("input", { value: promptInput, onChange: (e) => setPromptInput(e.target.value) })] }), _jsxs("div", { className: "row", children: [_jsx("button", { onClick: startCodexStream, disabled: isStreaming, children: "Run Prompt" }), _jsx("button", { onClick: fetchStreamHistory, children: "\u5C65\u6B74\u3092\u53D6\u5F97" })] })] }), _jsxs("section", { className: "card", children: [_jsx("h2", { children: "\u30ED\u30B0" }), _jsx("button", { onClick: fetchLogs, children: "\u6700\u65B0\u53D6\u5F97" }), _jsx("ul", { children: logs.map((l) => (_jsxs("li", { children: [l.timestamp, " [", l.level, "] ", l.message] }, l.id))) })] }), _jsxs("section", { className: "card", children: [_jsx("h2", { children: "WS\u30A4\u30D9\u30F3\u30C8" }), _jsx("div", { className: "row", children: _jsx("button", { onClick: () => setEvents([]), children: "\u30AF\u30EA\u30A2" }) }), _jsx("ul", { className: "mono", children: events.map((e, i) => (_jsx("li", { children: e }, `${i}_${e.slice(0, 8)}`))) })] }), _jsxs("section", { className: "card", children: [_jsx("h2", { children: "Codex \u30B9\u30C8\u30EA\u30FC\u30E0\u5C65\u6B74" }), _jsxs("div", { className: "row", children: [_jsx("button", { onClick: fetchStreamHistory, children: "\u5C65\u6B74\u3092\u53D6\u5F97" }), _jsx("button", { onClick: () => setSelectedStream(null), children: "\u30AF\u30EA\u30A2" })] }), streamHistory.length > 0 && (_jsxs("div", { children: [_jsx("h3", { children: "\u904E\u53BB\u306E\u30B9\u30C8\u30EA\u30FC\u30E0" }), _jsx("ul", { children: streamHistory.map((s) => (_jsxs("li", { children: [_jsx("strong", { children: s.model }), " ", new Date(s.createdAt).toLocaleString(), " ", _jsx("button", { onClick: () => loadStreamDetail(s.streamId), children: "\u8A73\u7D30" })] }, s.streamId))) })] })), selectedStream && (_jsxs("div", { className: "card", style: { marginTop: 16, backgroundColor: "#f5f5f5" }, children: [_jsx("h3", { children: "\u30B9\u30C8\u30EA\u30FC\u30E0\u8A73\u7D30" }), _jsxs("p", { children: [_jsx("strong", { children: "Model:" }), " ", selectedStream.model] }), _jsxs("p", { children: [_jsx("strong", { children: "Device:" }), " ", selectedStream.deviceId] }), _jsxs("p", { children: [_jsx("strong", { children: "Created:" }), " ", new Date(selectedStream.createdAt).toLocaleString()] }), _jsx("p", { children: _jsx("strong", { children: "Prompt:" }) }), _jsx("pre", { className: "mono terminal-history", children: selectedStream.prompt }), _jsx("p", { children: _jsx("strong", { children: "Output:" }) }), _jsx("pre", { className: "mono terminal-history", children: selectedStream.output })] }))] })] }));
 }

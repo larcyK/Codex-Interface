@@ -130,14 +130,55 @@ ul {
   border: 1px solid #0f172a;
   border-radius: 14px;
   background:
-    radial-gradient(circle at top right, rgba(59, 130, 246, 0.22), transparent 28%),
+    radial-gradient(circle at top right, rgba(14, 165, 233, 0.18), transparent 24%),
     linear-gradient(180deg, #111827 0%, #020617 100%);
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 18px 40px rgba(2, 6, 23, 0.24);
   overflow: hidden;
 }
+.terminal-chrome {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+  background:
+    linear-gradient(180deg, rgba(30, 41, 59, 0.96), rgba(15, 23, 42, 0.96));
+  color: #cbd5e1;
+}
+.terminal-lights {
+  display: flex;
+  gap: 8px;
+}
+.terminal-light {
+  width: 11px;
+  height: 11px;
+  border-radius: 999px;
+  box-shadow: inset 0 1px 1px rgba(255,255,255,0.22);
+}
+.terminal-light-close {
+  background: #fb7185;
+}
+.terminal-light-minimize {
+  background: #fbbf24;
+}
+.terminal-light-expand {
+  background: #34d399;
+}
+.terminal-title,
+.terminal-shell {
+  font-size: 0.82rem;
+}
+.terminal-title {
+  text-align: center;
+  color: #e2e8f0;
+}
+.terminal-shell {
+  color: #94a3b8;
+}
 .terminal-host {
   min-height: 420px;
-  padding: 10px;
+  padding: 12px 10px 10px;
 }
 .terminal-actions {
   margin-bottom: 8px;
@@ -169,7 +210,8 @@ ul {
 .terminal-block {
   border: 1px solid #cbd5e1;
   border-radius: 12px;
-  background: rgba(248, 250, 252, 0.9);
+  background:
+    linear-gradient(180deg, rgba(248, 250, 252, 0.96), rgba(241, 245, 249, 0.92));
   overflow: hidden;
 }
 .terminal-block summary {
@@ -200,15 +242,62 @@ ul {
   border-radius: 0;
   border-top: 1px solid #e2e8f0;
   white-space: pre-wrap;
+  background:
+    linear-gradient(180deg, #0f172a 0%, #020617 100%);
+  color: #e5eefc;
+  text-shadow: 0 0 0 transparent;
+}
+.terminal-block-line {
+  display: inline;
 }
 .terminal-block-meta summary {
   background: rgba(226, 232, 240, 0.65);
 }
 .terminal-block-thinking summary {
-  background: rgba(254, 240, 138, 0.32);
+  background: linear-gradient(90deg, rgba(254, 240, 138, 0.45), rgba(253, 224, 71, 0.18));
 }
 .terminal-block-output summary {
-  background: rgba(191, 219, 254, 0.28);
+  background: linear-gradient(90deg, rgba(125, 211, 252, 0.28), rgba(59, 130, 246, 0.12));
+}
+.ansi-bold {
+  font-weight: 700;
+}
+.ansi-dim {
+  opacity: 0.72;
+}
+.ansi-fg-black {
+  color: #111827;
+}
+.ansi-fg-red,
+.ansi-fg-bright-red {
+  color: #f87171;
+}
+.ansi-fg-green,
+.ansi-fg-bright-green {
+  color: #4ade80;
+}
+.ansi-fg-yellow,
+.ansi-fg-bright-yellow {
+  color: #facc15;
+}
+.ansi-fg-blue,
+.ansi-fg-bright-blue {
+  color: #60a5fa;
+}
+.ansi-fg-magenta,
+.ansi-fg-bright-magenta {
+  color: #e879f9;
+}
+.ansi-fg-cyan,
+.ansi-fg-bright-cyan {
+  color: #22d3ee;
+}
+.ansi-fg-white,
+.ansi-fg-bright-white {
+  color: #f8fafc;
+}
+.ansi-fg-bright-black {
+  color: #94a3b8;
 }
 .terminal-history {
   max-height: 260px;

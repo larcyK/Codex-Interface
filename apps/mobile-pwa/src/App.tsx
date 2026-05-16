@@ -23,18 +23,100 @@ type TerminalBlock = {
   defaultOpen: boolean;
 };
 
+type AnsiState = {
+  fg: string | null;
+  bold: boolean;
+  dim: boolean;
+};
+
 const API_PREFIX = "/api/v1";
 const ANSI_ESCAPE_RE = /\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g;
+const ANSI_SGR_RE = /\x1b\[([0-9;]*)m/g;
 const META_LINE_RE = /^\[(local|ws open|ws closed|done|error|raw|connect failed|cancel requested|ws error)\]/i;
 const HEADER_LINE_RE = /^(OpenAI Codex|Model:|Directory:|Safety:|Session:|Permission mode:)/i;
 const SESSION_INFO_LINE_RE = /^(provider:|approval:|sandbox:|reasoning effort:|reasoning summaries:|session id:)/i;
 const ROLE_LINE_RE = /^(user|assistant|codex)$/i;
 const THINKING_LINE_RE = /^(thinking|reasoning|analysis|plan|searching|reading|inspecting|editing|running|patching|diffing|tool\b)/i;
+const ANSI_FG_CLASS: Record<number, string> = {
+  30: "ansi-fg-black",
+  31: "ansi-fg-red",
+  32: "ansi-fg-green",
+  33: "ansi-fg-yellow",
+  34: "ansi-fg-blue",
+  35: "ansi-fg-magenta",
+  36: "ansi-fg-cyan",
+  37: "ansi-fg-white",
+  90: "ansi-fg-bright-black",
+  91: "ansi-fg-bright-red",
+  92: "ansi-fg-bright-green",
+  93: "ansi-fg-bright-yellow",
+  94: "ansi-fg-bright-blue",
+  95: "ansi-fg-bright-magenta",
+  96: "ansi-fg-bright-cyan",
+  97: "ansi-fg-bright-white",
+};
 
 const stripAnsi = (text: string) => text.replace(ANSI_ESCAPE_RE, "");
 
+const applyAnsiCode = (state: AnsiState, code: number): AnsiState => {
+  if (code === 0) {
+    return { fg: null, bold: false, dim: false };
+  }
+  if (code === 1) {
+    return { ...state, bold: true, dim: false };
+  }
+  if (code === 2) {
+    return { ...state, dim: true, bold: false };
+  }
+  if (code === 22) {
+    return { ...state, bold: false, dim: false };
+  }
+  if (code === 39) {
+    return { ...state, fg: null };
+  }
+  if (code in ANSI_FG_CLASS) {
+    return { ...state, fg: ANSI_FG_CLASS[code] };
+  }
+  return state;
+};
+
+const parseAnsiLine = (line: string): Array<{ text: string; className: string }> => {
+  const spans: Array<{ text: string; className: string }> = [];
+  let state: AnsiState = { fg: null, bold: false, dim: false };
+  let lastIndex = 0;
+
+  for (const match of line.matchAll(ANSI_SGR_RE)) {
+    const index = match.index ?? 0;
+    if (index > lastIndex) {
+      const text = line.slice(lastIndex, index);
+      const classes = [state.fg, state.bold ? "ansi-bold" : "", state.dim ? "ansi-dim" : ""].filter(Boolean).join(" ");
+      spans.push({ text, className: classes });
+    }
+    const codes = (match[1] || "0")
+      .split(";")
+      .map((part) => Number(part || "0"))
+      .filter((code) => Number.isFinite(code));
+    for (const code of codes) {
+      state = applyAnsiCode(state, code);
+    }
+    lastIndex = index + match[0].length;
+  }
+
+  if (lastIndex < line.length) {
+    const text = line.slice(lastIndex);
+    const classes = [state.fg, state.bold ? "ansi-bold" : "", state.dim ? "ansi-dim" : ""].filter(Boolean).join(" ");
+    spans.push({ text, className: classes });
+  }
+
+  if (spans.length === 0) {
+    spans.push({ text: stripAnsi(line), className: "" });
+  }
+
+  return spans;
+};
+
 const getBlockKind = (line: string, currentKind: TerminalBlockKind | null): TerminalBlockKind => {
-  const trimmed = line.trim();
+  const trimmed = stripAnsi(line).trim();
   if (!trimmed) {
     return currentKind ?? "meta";
   }
@@ -55,8 +137,8 @@ const getBlockKind = (line: string, currentKind: TerminalBlockKind | null): Term
 
 const buildTerminalBlock = (kind: TerminalBlockKind, lines: string[], index: number): TerminalBlock => {
   const content = lines.join("\n").trimEnd();
-  const lineCount = lines.filter((line) => line.trim().length > 0).length || 1;
-  const firstLine = lines.find((line) => line.trim().length > 0)?.trim() ?? "";
+  const lineCount = lines.filter((line) => stripAnsi(line).trim().length > 0).length || 1;
+  const firstLine = lines.find((line) => stripAnsi(line).trim().length > 0)?.trim() ?? "";
 
   let title = "Output";
   let defaultOpen = true;
@@ -160,7 +242,7 @@ export default function App() {
   }, []);
 
   const compactBlocks = useMemo(() => {
-    const normalized = stripAnsi(streamOutput).replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
+    const normalized = streamOutput.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
     if (!normalized) {
       return [] as TerminalBlock[];
     }
@@ -666,7 +748,18 @@ export default function App() {
                     <span>{block.title}</span>
                     <span className="mono terminal-block-meta">{block.lineCount} lines</span>
                   </summary>
-                  <pre className="mono terminal-block-content">{block.content}</pre>
+                  <pre className="mono terminal-block-content">
+                    {block.content.split("\n").map((line, lineIndex) => (
+                      <span key={`${block.id}-${lineIndex}`} className="terminal-block-line">
+                        {parseAnsiLine(line).map((span, spanIndex) => (
+                          <span key={`${block.id}-${lineIndex}-${spanIndex}`} className={span.className}>
+                            {span.text}
+                          </span>
+                        ))}
+                        {lineIndex < block.content.split("\n").length - 1 ? "\n" : ""}
+                      </span>
+                    ))}
+                  </pre>
                 </details>
               ))
             )}
@@ -674,6 +767,15 @@ export default function App() {
         )}
         {(terminalView === "raw" || terminalView === "split") && (
           <div className="terminal-frame">
+            <div className="terminal-chrome">
+              <div className="terminal-lights" aria-hidden="true">
+                <span className="terminal-light terminal-light-close" />
+                <span className="terminal-light terminal-light-minimize" />
+                <span className="terminal-light terminal-light-expand" />
+              </div>
+              <div className="terminal-title mono">codex / interactive stream</div>
+              <div className="terminal-shell mono">zsh</div>
+            </div>
             <div ref={terminalHostRef} className="terminal-host" />
           </div>
         )}
