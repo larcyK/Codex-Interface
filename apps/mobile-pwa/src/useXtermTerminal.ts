@@ -18,6 +18,18 @@ export const useXtermTerminal = () => {
     terminalRef.current?.write(text);
   }, []);
 
+  const setTerminalOutput = useCallback((text: string) => {
+    transcriptRef.current = text;
+    setStreamOutput(text);
+    if (terminalRef.current) {
+      terminalRef.current.reset();
+      terminalRef.current.clear();
+      if (text) {
+        terminalRef.current.write(text);
+      }
+    }
+  }, []);
+
   const resetTerminal = useCallback(() => {
     transcriptRef.current = "";
     setStreamOutput("");
@@ -61,6 +73,9 @@ export const useXtermTerminal = () => {
     fitAddon.fit();
     term.writeln("Codex terminal ready.");
     term.writeln("");
+    if (transcriptRef.current) {
+      term.write(transcriptRef.current);
+    }
 
     terminalRef.current = term;
     fitAddonRef.current = fitAddon;
@@ -80,6 +95,7 @@ export const useXtermTerminal = () => {
     terminalHostRef,
     streamOutput,
     appendTerminal,
+    setTerminalOutput,
     resetTerminal,
     clearTerminalView,
     fitTerminal,

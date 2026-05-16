@@ -45,6 +45,7 @@ export default function App() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamHistory, setStreamHistory] = useState<Array<{
     streamId: string;
+    sessionId?: string;
     model: string;
     prompt: string;
     output: string;
@@ -53,12 +54,22 @@ export default function App() {
   }>>([]);
   const [selectedStream, setSelectedStream] = useState<{
     streamId: string;
+    sessionId?: string;
     model: string;
     prompt: string;
     output: string;
     deviceId: string;
     createdAt: string;
   } | null>(null);
+  const [sessionStreamHistory, setSessionStreamHistory] = useState<Array<{
+    streamId: string;
+    sessionId?: string;
+    model: string;
+    prompt: string;
+    output: string;
+    deviceId: string;
+    createdAt: string;
+  }>>([]);
   const [chatInput, setChatInput] = useState("");
   const [terminalStatus, setTerminalStatus] = useState("ready");
   const [terminalView, setTerminalView] = useState<"compact" | "split" | "raw">("compact");
@@ -92,6 +103,7 @@ export default function App() {
     terminalHostRef,
     streamOutput,
     appendTerminal,
+    setTerminalOutput,
     resetTerminal,
     clearTerminalView: resetTerminalView,
     fitTerminal,
@@ -238,6 +250,8 @@ export default function App() {
     if (res.sessionId) {
       setSessionId(res.sessionId);
       setCommandResult(`セッション開始: ${res.sessionId}`);
+      setSessionStreamHistory([]);
+      setTerminalOutput("");
     }
   };
 
@@ -270,6 +284,8 @@ export default function App() {
   const closeSession = async () => {
     await api.del("/sessions/current");
     setSessionId("");
+    setSessionStreamHistory([]);
+    setTerminalOutput("");
   };
 
   const logout = () => {
@@ -309,6 +325,24 @@ export default function App() {
       setStreamHistory(res.items);
     }
   };
+
+  const fetchSessionStreamHistory = useCallback(async (targetSessionId: string) => {
+    if (!targetSessionId) {
+      setSessionStreamHistory([]);
+      setTerminalOutput("");
+      return;
+    }
+    const res = await api.get(`/codex/history?limit=100&sessionId=${encodeURIComponent(targetSessionId)}`, true);
+    if (res?.items) {
+      const items = [...res.items].reverse();
+      setSessionStreamHistory(items);
+      const mergedTranscript = items
+        .map((item: { output: string }) => item.output.trim())
+        .filter(Boolean)
+        .join("\n\n");
+      setTerminalOutput(mergedTranscript);
+    }
+  }, [api, setTerminalOutput]);
 
   const browseFiles = useCallback(async (path = "") => {
     setIsBrowsing(true);
@@ -356,11 +390,12 @@ export default function App() {
   const openTerminalStream = useCallback(async (prompt: string) => {
     if (!prompt.trim() || isStreaming) return;
     const activeSessionId = await ensureActiveSessionId();
-
-    resetTerminal();
     setSelectedStream(null);
     setIsStreaming(true);
     setTerminalStatus("connecting");
+    if (streamOutput.trim()) {
+      appendTerminal("\r\n\r\n\x1b[90m======== next turn ========\x1b[0m\r\n");
+    }
     appendTerminal(`\x1b[90m[local] starting Codex stream for model=${modelInput}, backend=${backendChoice}\x1b[0m\r\n`);
 
     const res = await api.post(
@@ -394,6 +429,9 @@ export default function App() {
             appendTerminal("\r\n\x1b[32m[done]\x1b[0m\r\n");
             setTerminalStatus("done");
             setIsStreaming(false);
+            if (activeSessionId) {
+              void fetchSessionStreamHistory(activeSessionId);
+            }
             try {
               ws.close();
             } catch {
@@ -433,10 +471,11 @@ export default function App() {
     appendTerminal,
     backendChoice,
     ensureActiveSessionId,
+    fetchSessionStreamHistory,
     fitTerminal,
     isStreaming,
     modelInput,
-    resetTerminal,
+    streamOutput,
     token,
     wsRef,
   ]);
@@ -508,14 +547,23 @@ export default function App() {
   useEffect(() => {
     if (!token) {
       setSessionId("");
+      setSessionStreamHistory([]);
       setBrowserData(null);
       setSelectedFile(null);
       setBrowserError("");
+      setTerminalOutput("");
       return;
     }
-    void fetchCurrentSession();
+    void fetchCurrentSession().then((activeSessionId) => {
+      if (activeSessionId) {
+        void fetchSessionStreamHistory(activeSessionId);
+      } else {
+        setSessionStreamHistory([]);
+        setTerminalOutput("");
+      }
+    });
     void browseFiles("");
-  }, [browseFiles, fetchCurrentSession, token]);
+  }, [browseFiles, fetchCurrentSession, fetchSessionStreamHistory, setTerminalOutput, token]);
 
   return (
     <main className="app">
@@ -585,6 +633,7 @@ export default function App() {
           <button onClick={closeSession}>セッション終了</button>
         </div>
         <p className="mono">Session: {sessionId || "なし"}</p>
+        <p className="mono">Session Rallies: {sessionStreamHistory.length}</p>
         <label>
           Command
           <input value={command} onChange={(e) => setCommand(e.target.value)} />
@@ -650,6 +699,26 @@ export default function App() {
             <li key={`${i}_${e.slice(0, 8)}`}>{e}</li>
           ))}
         </ul>
+      </section>
+
+      <section className="card">
+        <h2>このセッションの会話履歴</h2>
+        <div className="row">
+          <button onClick={() => void fetchSessionStreamHistory(sessionId)} disabled={!sessionId}>このセッションを再読込</button>
+        </div>
+        {sessionStreamHistory.length > 0 ? (
+          <ul>
+            {sessionStreamHistory.map((s) => (
+              <li key={s.streamId}>
+                <strong>{new Date(s.createdAt).toLocaleString()}</strong>{" "}
+                <span className="mono">{s.prompt.slice(0, 60)}</span>
+                <button onClick={() => loadStreamDetail(s.streamId)}>詳細</button>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="mono">この session にはまだ会話履歴がありません。</p>
+        )}
       </section>
 
       <section className="card">

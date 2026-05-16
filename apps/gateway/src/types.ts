@@ -36,6 +36,7 @@ export interface LogEntry {
 
 export interface CodexStreamLog {
   streamId: string;
+  sessionId?: string;
   model: string;
   prompt: string;
   output: string;

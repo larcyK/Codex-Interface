@@ -50,6 +50,7 @@ export class SqliteStore {
 
       CREATE TABLE IF NOT EXISTS codex_streams (
         streamId TEXT PRIMARY KEY,
+        sessionId TEXT,
         model TEXT NOT NULL,
         prompt TEXT NOT NULL,
         output TEXT NOT NULL,
@@ -78,6 +79,10 @@ export class SqliteStore {
     const sessionColumns = this.db.prepare("PRAGMA table_info(sessions)").all() as Array<{ name: string }>;
     if (!sessionColumns.some((column) => column.name === "codexSessionId")) {
       this.db.exec("ALTER TABLE sessions ADD COLUMN codexSessionId TEXT");
+    }
+    const streamColumns = this.db.prepare("PRAGMA table_info(codex_streams)").all() as Array<{ name: string }>;
+    if (!streamColumns.some((column) => column.name === "sessionId")) {
+      this.db.exec("ALTER TABLE codex_streams ADD COLUMN sessionId TEXT");
     }
   }
 
@@ -259,10 +264,11 @@ export class SqliteStore {
     const createdAt = streamLog.createdAt || nowIso();
     this.db
       .prepare(
-        "INSERT INTO codex_streams (streamId, model, prompt, output, deviceId, tokensJson, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO codex_streams (streamId, sessionId, model, prompt, output, deviceId, tokensJson, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
       )
       .run(
         streamLog.streamId,
+        streamLog.sessionId ?? null,
         streamLog.model,
         streamLog.prompt,
         streamLog.output,
@@ -272,7 +278,7 @@ export class SqliteStore {
       );
   }
 
-  getStreamHistory(limit = 50, offset = 0): {
+  getStreamHistory(limit = 50, offset = 0, sessionId?: string): {
     items: Array<{
       streamId: string;
       model: string;
@@ -284,17 +290,26 @@ export class SqliteStore {
     }>;
     total: number;
   } {
-    const rows = this.db
-      .prepare("SELECT * FROM codex_streams ORDER BY createdAt DESC LIMIT ? OFFSET ?")
-      .all(limit, offset) as Array<any>;
+    const rows = sessionId
+      ? this.db
+          .prepare("SELECT * FROM codex_streams WHERE sessionId = ? ORDER BY createdAt DESC LIMIT ? OFFSET ?")
+          .all(sessionId, limit, offset) as Array<any>
+      : this.db
+          .prepare("SELECT * FROM codex_streams ORDER BY createdAt DESC LIMIT ? OFFSET ?")
+          .all(limit, offset) as Array<any>;
 
-    const total = this.db
-      .prepare("SELECT COUNT(*) as cnt FROM codex_streams")
-      .get() as Record<string, number>;
+    const total = sessionId
+      ? this.db
+          .prepare("SELECT COUNT(*) as cnt FROM codex_streams WHERE sessionId = ?")
+          .get(sessionId) as Record<string, number>
+      : this.db
+          .prepare("SELECT COUNT(*) as cnt FROM codex_streams")
+          .get() as Record<string, number>;
 
     return {
       items: rows.map((r) => ({
         streamId: r.streamId,
+        sessionId: r.sessionId ?? undefined,
         model: r.model,
         prompt: r.prompt,
         output: r.output,
@@ -308,6 +323,7 @@ export class SqliteStore {
 
   getStreamDetail(streamId: string): {
     streamId: string;
+    sessionId?: string;
     model: string;
     prompt: string;
     output: string;
@@ -325,6 +341,7 @@ export class SqliteStore {
 
     return {
       streamId: row.streamId,
+      sessionId: row.sessionId ?? undefined,
       model: row.model,
       prompt: row.prompt,
       output: row.output,

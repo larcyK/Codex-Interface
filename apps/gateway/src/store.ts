@@ -112,6 +112,7 @@ export class JsonStore {
   // Codex stream history (for JsonStore-backed mode)
   addStreamLog(stream: {
     streamId: string;
+    sessionId?: string;
     model: string;
     prompt: string;
     output: string;
@@ -121,6 +122,7 @@ export class JsonStore {
   }): void {
     const entry = {
       streamId: stream.streamId,
+      sessionId: stream.sessionId,
       model: stream.model,
       prompt: stream.prompt,
       output: stream.output,
@@ -137,8 +139,12 @@ export class JsonStore {
     this.persist();
   }
 
-  getStreamHistory(limit = 50, offset = 0): { items: any[]; total: number } {
-    const arr = this.state.codexStreams ? [...this.state.codexStreams].reverse() : [];
+  getStreamHistory(limit = 50, offset = 0, sessionId?: string): { items: any[]; total: number } {
+    const arr = this.state.codexStreams
+      ? [...this.state.codexStreams]
+          .filter((item) => !sessionId || item.sessionId === sessionId)
+          .reverse()
+      : [];
     const items = arr.slice(offset, offset + limit);
     return { items, total: arr.length };
   }

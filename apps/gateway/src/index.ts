@@ -410,6 +410,7 @@ wss.on("connection", async (socket: WebSocket, req: IncomingMessage) => {
       }
       store.addStreamLog({
         streamId,
+        sessionId: pending.gatewaySessionId,
         model: pending.req.model,
         prompt: pending.req.prompt,
         output,
@@ -578,8 +579,9 @@ app.get("/api/v1/codex/history", async (req, reply) => {
   const query = req.query as Record<string, any>;
   const limit = Math.min(Number(query.limit ?? "50"), 100);
   const offset = Number(query.offset ?? "0");
+  const sessionId = typeof query.sessionId === "string" ? query.sessionId : undefined;
 
-  const result = store.getStreamHistory(limit, offset);
+  const result = store.getStreamHistory(limit, offset, sessionId);
   return result;
 });
 
