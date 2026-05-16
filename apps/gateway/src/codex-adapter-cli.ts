@@ -31,6 +31,36 @@ const getCliConfig = () => {
   return { command, args, promptMode, timeoutMs, usePty };
 };
 
+const supportsResume = (command: string, args: string[]) => {
+  return command.endsWith("codex") && args[0] === "exec";
+};
+
+const buildCliArgs = (
+  command: string,
+  baseArgs: string[],
+  prompt: string,
+  promptMode: "stdin" | "arg",
+  resumeSessionId?: string,
+) => {
+  const finalArgs = [...baseArgs];
+  const canResume = Boolean(resumeSessionId) && supportsResume(command, baseArgs);
+
+  if (canResume && resumeSessionId) {
+    finalArgs.push("resume", resumeSessionId);
+    if (promptMode === "arg") {
+      finalArgs.push(prompt);
+    } else {
+      finalArgs.push("-");
+    }
+    return finalArgs;
+  }
+
+  if (promptMode === "arg") {
+    finalArgs.push(prompt);
+  }
+  return finalArgs;
+};
+
 export class CliCodexAdapter implements CodexAdapter {
   async executeSync(req: ExecutionRequest): Promise<{ id: string; output: string }> {
     const { command, args, promptMode, timeoutMs, usePty } = getCliConfig();
@@ -40,12 +70,16 @@ export class CliCodexAdapter implements CodexAdapter {
     const stdinSpec = effectivePromptMode === "arg" ? "ignore" : "pipe";
 
     return await new Promise((resolve, reject) => {
-      const finalArgs = [...args];
+      const finalArgs = buildCliArgs(command, args, req.prompt, effectivePromptMode as "stdin" | "arg", req.resumeSessionId);
       if (command.endsWith("codex") && !finalArgs.includes("--color")) {
         finalArgs.push("--color", "always");
       }
-      if (effectivePromptMode === "arg") {
-        finalArgs.push(req.prompt);
+      if (req.resumeSessionId && supportsResume(command, args)) {
+        const colorIndex = finalArgs.lastIndexOf("--color");
+        if (colorIndex > finalArgs.indexOf("resume")) {
+          finalArgs.splice(colorIndex, 2);
+          finalArgs.splice(1, 0, "--color", "always");
+        }
       }
 
       const child = spawn(command, finalArgs, {
@@ -110,17 +144,18 @@ export class CliCodexAdapter implements CodexAdapter {
     // prevent unhandled 'error' from crashing the process if adapter emits before
     // the caller has a chance to attach listeners
     ee.on("error", () => {});
-    const finalArgs = [...args];
+    const effectivePromptMode = promptMode === "stdin" && !usePty ? "arg" : promptMode;
+    const stdinSpec = effectivePromptMode === "arg" ? "ignore" : "pipe";
+    const finalArgs = buildCliArgs(command, args, req.prompt, effectivePromptMode as "stdin" | "arg", req.resumeSessionId);
     if (command.endsWith("codex") && !finalArgs.includes("--color")) {
       finalArgs.push("--color", "always");
     }
-
-    // if CODEX_CLI_PROMPT_MODE=stdin but no PTY requested, fall back to arg to avoid CLI TTY errors
-    const effectivePromptMode = promptMode === "stdin" && !usePty ? "arg" : promptMode;
-    const stdinSpec = effectivePromptMode === "arg" ? "ignore" : "pipe";
-
-    if (effectivePromptMode === "arg") {
-      finalArgs.push(req.prompt);
+    if (req.resumeSessionId && supportsResume(command, args)) {
+      const colorIndex = finalArgs.lastIndexOf("--color");
+      if (colorIndex > finalArgs.indexOf("resume")) {
+        finalArgs.splice(colorIndex, 2);
+        finalArgs.splice(1, 0, "--color", "always");
+      }
     }
 
     const child = spawn(command, finalArgs, {

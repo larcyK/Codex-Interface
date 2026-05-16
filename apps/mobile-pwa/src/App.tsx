@@ -241,6 +241,32 @@ export default function App() {
     }
   };
 
+  const fetchCurrentSession = useCallback(async () => {
+    const res = await api.get("/sessions/current");
+    if (res?.sessionId && res?.status === "active") {
+      setSessionId(res.sessionId);
+      return res.sessionId as string;
+    }
+    setSessionId("");
+    return "";
+  }, [api]);
+
+  const ensureActiveSessionId = useCallback(async () => {
+    if (sessionId) {
+      return sessionId;
+    }
+    const current = await fetchCurrentSession();
+    if (current) {
+      return current;
+    }
+    const created = await api.post("/sessions", {}, true);
+    if (created?.sessionId) {
+      setSessionId(created.sessionId);
+      return created.sessionId as string;
+    }
+    return "";
+  }, [api, fetchCurrentSession, sessionId]);
+
   const closeSession = async () => {
     await api.del("/sessions/current");
     setSessionId("");
@@ -329,6 +355,7 @@ export default function App() {
 
   const openTerminalStream = useCallback(async (prompt: string) => {
     if (!prompt.trim() || isStreaming) return;
+    const activeSessionId = await ensureActiveSessionId();
 
     resetTerminal();
     setSelectedStream(null);
@@ -338,7 +365,7 @@ export default function App() {
 
     const res = await api.post(
       "/codex/stream",
-      { model: modelInput, prompt, metadata: { backend: backendChoice } },
+      { model: modelInput, prompt, metadata: { backend: backendChoice, ...(activeSessionId ? { sessionId: activeSessionId } : {}) } },
       true,
     );
     if (!res?.streamId || !res?.wsUrl) {
@@ -405,6 +432,7 @@ export default function App() {
     api,
     appendTerminal,
     backendChoice,
+    ensureActiveSessionId,
     fitTerminal,
     isStreaming,
     modelInput,
@@ -479,13 +507,15 @@ export default function App() {
 
   useEffect(() => {
     if (!token) {
+      setSessionId("");
       setBrowserData(null);
       setSelectedFile(null);
       setBrowserError("");
       return;
     }
+    void fetchCurrentSession();
     void browseFiles("");
-  }, [browseFiles, token]);
+  }, [browseFiles, fetchCurrentSession, token]);
 
   return (
     <main className="app">

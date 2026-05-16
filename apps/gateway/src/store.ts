@@ -61,6 +61,10 @@ export class JsonStore {
     return session;
   }
 
+  getSession(sessionId: string): Session | undefined {
+    return this.state.sessions.find((item) => item.sessionId === sessionId);
+  }
+
   getCurrentSession(): Session | undefined {
     return [...this.state.sessions].reverse().find((item) => item.status === "active");
   }

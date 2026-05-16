@@ -8,6 +8,7 @@ export type ExecutionRequest = {
   maxTokens?: number;
   temperature?: number;
   metadata?: Record<string, unknown>;
+  resumeSessionId?: string;
 };
 
 export type StreamChunk = {

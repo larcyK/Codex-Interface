@@ -47,6 +47,8 @@ npm run dev:mobile
 2. PINに `123456` を入力してログイン
 3. セッション開始 -> コマンド実行
 
+Codex の継続会話は gateway の active session に紐付きます。PWA は送信時に session が無ければ自動作成し、同じ active session が残っている限り `codex exec resume` で会話を継続します。
+
 **注**: API HostとWS URLはブラウザのホストから自動推定されるため、手動設定は不要です。
 
 ## ビルド

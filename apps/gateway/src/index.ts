@@ -40,6 +40,8 @@ const codexAdapter = getCodexAdapter();
 const codexBackend = getCodexBackendName();
 
 const wsClients = new Set<WebSocket>();
+const CODEX_SESSION_ID_RE = /session id:\s*([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i;
+const ANSI_ESCAPE_RE = /\x1b\[[0-9;]*m/g;
 
 const emitEvent = (event: string, payload: unknown) => {
   const data = JSON.stringify({
@@ -52,6 +54,12 @@ const emitEvent = (event: string, payload: unknown) => {
       client.send(data);
     }
   }
+};
+
+const extractCodexSessionId = (text: string) => {
+  const sanitized = text.replace(ANSI_ESCAPE_RE, "");
+  const match = sanitized.match(CODEX_SESSION_ID_RE);
+  return match?.[1];
 };
 
 const authSchema = z.object({
@@ -315,7 +323,7 @@ app.get("/api/v1/files/content", async (req, reply) => {
 
 const wss = new WebSocketServer({ port: wsPort, path: "/ws" });
 // map of pending stream requests created by /api/v1/codex/stream
-const pendingStreams = new Map<string, { req: any; createdAt: number; socket?: WebSocket }>();
+const pendingStreams = new Map<string, { req: any; createdAt: number; socket?: WebSocket; gatewaySessionId?: string }>();
 wss.on("connection", async (socket: WebSocket, req: IncomingMessage) => {
   const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
   const token = url.searchParams.get("token");
@@ -396,6 +404,10 @@ wss.on("connection", async (socket: WebSocket, req: IncomingMessage) => {
       sendSafe({ type: "done", id: meta.id });
       // Save stream to history
       const output = outputChunks.join("");
+      const codexSessionId = extractCodexSessionId(output);
+      if (pending.gatewaySessionId && codexSessionId) {
+        store.updateSession(pending.gatewaySessionId, { codexSessionId });
+      }
       store.addStreamLog({
         streamId,
         model: pending.req.model,
@@ -493,7 +505,16 @@ app.post("/api/v1/codex/execute", async (req, reply) => {
     const bodyOverride = parsed.data.metadata?.backend as string | undefined;
     const override = (headerOverride || bodyOverride || "").toLowerCase();
     const adapterToUse = override === "cli" ? cliAdapter : codexAdapter;
-    const res = await adapterToUse.executeSync(parsed.data as any);
+    const gatewaySessionId = typeof parsed.data.metadata?.sessionId === "string" ? parsed.data.metadata.sessionId : undefined;
+    const gatewaySession = gatewaySessionId ? store.getSession(gatewaySessionId) : undefined;
+    const res = await adapterToUse.executeSync({
+      ...parsed.data,
+      resumeSessionId: gatewaySession?.codexSessionId,
+    } as any);
+    const codexSessionId = extractCodexSessionId(res.output);
+    if (gatewaySessionId && codexSessionId) {
+      store.updateSession(gatewaySessionId, { codexSessionId });
+    }
     store.addLog({ level: "info", category: "codex", message: `execute ${model}`, requestId: res.id });
     return { id: res.id, output: res.output };
   } catch (e: any) {
@@ -520,8 +541,17 @@ app.post("/api/v1/codex/stream", async (req, reply) => {
     return reply.code(400).send({ error: { code: "INVALID_REQUEST", message: "Invalid payload" } });
   }
 
+  const gatewaySessionId = typeof parsed.data.metadata?.sessionId === "string" ? parsed.data.metadata.sessionId : undefined;
+  const gatewaySession = gatewaySessionId ? store.getSession(gatewaySessionId) : undefined;
   const streamId = `stream_${randomUUID()}`;
-  pendingStreams.set(streamId, { req: parsed.data, createdAt: Date.now() });
+  pendingStreams.set(streamId, {
+    req: {
+      ...parsed.data,
+      resumeSessionId: gatewaySession?.codexSessionId,
+    },
+    createdAt: Date.now(),
+    gatewaySessionId,
+  });
   store.addLog({ level: "info", category: "codex", message: `stream started`, requestId: streamId });
 
   // Build a wsUrl using the request host so clients (on other devices) get a reachable address

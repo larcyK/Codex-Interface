@@ -25,7 +25,8 @@ export class SqliteStore {
         deviceId TEXT NOT NULL,
         status TEXT NOT NULL,
         createdAt TEXT NOT NULL,
-        closedAt TEXT
+        closedAt TEXT,
+        codexSessionId TEXT
       );
 
       CREATE TABLE IF NOT EXISTS commands (
@@ -73,6 +74,11 @@ export class SqliteStore {
         .prepare("INSERT INTO config (key, value) VALUES (?, ?)")
         .run("pinHash", hashPin("123456"));
     }
+
+    const sessionColumns = this.db.prepare("PRAGMA table_info(sessions)").all() as Array<{ name: string }>;
+    if (!sessionColumns.some((column) => column.name === "codexSessionId")) {
+      this.db.exec("ALTER TABLE sessions ADD COLUMN codexSessionId TEXT");
+    }
   }
 
   get pinHash(): string {
@@ -104,9 +110,9 @@ export class SqliteStore {
   createSession(session: Session): void {
     this.db
       .prepare(
-        "INSERT INTO sessions (sessionId, deviceId, status, createdAt) VALUES (?, ?, ?, ?)",
+        "INSERT INTO sessions (sessionId, deviceId, status, createdAt, codexSessionId) VALUES (?, ?, ?, ?, ?)",
       )
-      .run(session.sessionId, session.deviceId, session.status, session.createdAt);
+      .run(session.sessionId, session.deviceId, session.status, session.createdAt, session.codexSessionId ?? null);
   }
 
   updateSession(sessionId: string, patch: Partial<Session>): Session | undefined {
@@ -141,6 +147,12 @@ export class SqliteStore {
     return this.db
       .prepare("SELECT * FROM sessions WHERE status = ? ORDER BY createdAt DESC LIMIT 1")
       .get("active") as Session | undefined;
+  }
+
+  getSession(sessionId: string): Session | undefined {
+    return this.db
+      .prepare("SELECT * FROM sessions WHERE sessionId = ?")
+      .get(sessionId) as Session | undefined;
   }
 
   putCommand(command: CommandRequest): void {
@@ -322,4 +334,3 @@ export class SqliteStore {
     };
   }
 }
-

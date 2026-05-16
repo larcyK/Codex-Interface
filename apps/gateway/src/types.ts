@@ -12,6 +12,7 @@ export interface Session {
   status: SessionStatus;
   createdAt: string;
   closedAt?: string;
+  codexSessionId?: string;
 }
 
 export interface CommandRequest {
