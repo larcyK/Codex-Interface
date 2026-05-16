@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Terminal } from "@xterm/xterm";
-import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import { useAutoReconnect } from "./useAutoReconnect";
 import { clearTokens, getTokens, saveTokens } from "./tokenStorage";
+import { buildTerminalBlocks } from "./terminalTranscript";
+import { useXtermTerminal } from "./useXtermTerminal";
+import { CodexTerminalSection } from "./CodexTerminalSection";
 
 type LogItem = {
   id: string;
@@ -12,155 +13,7 @@ type LogItem = {
   message: string;
 };
 
-type TerminalBlockKind = "meta" | "thinking" | "output";
-
-type TerminalBlock = {
-  id: string;
-  kind: TerminalBlockKind;
-  title: string;
-  content: string;
-  lineCount: number;
-  defaultOpen: boolean;
-};
-
-type AnsiState = {
-  fg: string | null;
-  bold: boolean;
-  dim: boolean;
-};
-
 const API_PREFIX = "/api/v1";
-const ANSI_ESCAPE_RE = /\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g;
-const ANSI_SGR_RE = /\x1b\[([0-9;]*)m/g;
-const META_LINE_RE = /^\[(local|ws open|ws closed|done|error|raw|connect failed|cancel requested|ws error)\]/i;
-const HEADER_LINE_RE = /^(OpenAI Codex|Model:|Directory:|Safety:|Session:|Permission mode:)/i;
-const SESSION_INFO_LINE_RE = /^(provider:|approval:|sandbox:|reasoning effort:|reasoning summaries:|session id:)/i;
-const ROLE_LINE_RE = /^(user|assistant|codex)$/i;
-const THINKING_LINE_RE = /^(thinking|reasoning|analysis|plan|searching|reading|inspecting|editing|running|patching|diffing|tool\b)/i;
-const ANSI_FG_CLASS: Record<number, string> = {
-  30: "ansi-fg-black",
-  31: "ansi-fg-red",
-  32: "ansi-fg-green",
-  33: "ansi-fg-yellow",
-  34: "ansi-fg-blue",
-  35: "ansi-fg-magenta",
-  36: "ansi-fg-cyan",
-  37: "ansi-fg-white",
-  90: "ansi-fg-bright-black",
-  91: "ansi-fg-bright-red",
-  92: "ansi-fg-bright-green",
-  93: "ansi-fg-bright-yellow",
-  94: "ansi-fg-bright-blue",
-  95: "ansi-fg-bright-magenta",
-  96: "ansi-fg-bright-cyan",
-  97: "ansi-fg-bright-white",
-};
-
-const stripAnsi = (text: string) => text.replace(ANSI_ESCAPE_RE, "");
-
-const applyAnsiCode = (state: AnsiState, code: number): AnsiState => {
-  if (code === 0) {
-    return { fg: null, bold: false, dim: false };
-  }
-  if (code === 1) {
-    return { ...state, bold: true, dim: false };
-  }
-  if (code === 2) {
-    return { ...state, dim: true, bold: false };
-  }
-  if (code === 22) {
-    return { ...state, bold: false, dim: false };
-  }
-  if (code === 39) {
-    return { ...state, fg: null };
-  }
-  if (code in ANSI_FG_CLASS) {
-    return { ...state, fg: ANSI_FG_CLASS[code] };
-  }
-  return state;
-};
-
-const parseAnsiLine = (line: string): Array<{ text: string; className: string }> => {
-  const spans: Array<{ text: string; className: string }> = [];
-  let state: AnsiState = { fg: null, bold: false, dim: false };
-  let lastIndex = 0;
-
-  for (const match of line.matchAll(ANSI_SGR_RE)) {
-    const index = match.index ?? 0;
-    if (index > lastIndex) {
-      const text = line.slice(lastIndex, index);
-      const classes = [state.fg, state.bold ? "ansi-bold" : "", state.dim ? "ansi-dim" : ""].filter(Boolean).join(" ");
-      spans.push({ text, className: classes });
-    }
-    const codes = (match[1] || "0")
-      .split(";")
-      .map((part) => Number(part || "0"))
-      .filter((code) => Number.isFinite(code));
-    for (const code of codes) {
-      state = applyAnsiCode(state, code);
-    }
-    lastIndex = index + match[0].length;
-  }
-
-  if (lastIndex < line.length) {
-    const text = line.slice(lastIndex);
-    const classes = [state.fg, state.bold ? "ansi-bold" : "", state.dim ? "ansi-dim" : ""].filter(Boolean).join(" ");
-    spans.push({ text, className: classes });
-  }
-
-  if (spans.length === 0) {
-    spans.push({ text: stripAnsi(line), className: "" });
-  }
-
-  return spans;
-};
-
-const getBlockKind = (line: string, currentKind: TerminalBlockKind | null): TerminalBlockKind => {
-  const trimmed = stripAnsi(line).trim();
-  if (!trimmed) {
-    return currentKind ?? "meta";
-  }
-  if (META_LINE_RE.test(trimmed) || HEADER_LINE_RE.test(trimmed) || SESSION_INFO_LINE_RE.test(trimmed)) {
-    return "meta";
-  }
-  if (ROLE_LINE_RE.test(trimmed)) {
-    return "output";
-  }
-  if (THINKING_LINE_RE.test(trimmed)) {
-    return "thinking";
-  }
-  if (currentKind === "thinking" && !ROLE_LINE_RE.test(trimmed) && !SESSION_INFO_LINE_RE.test(trimmed) && !META_LINE_RE.test(trimmed)) {
-    return "thinking";
-  }
-  return "output";
-};
-
-const buildTerminalBlock = (kind: TerminalBlockKind, lines: string[], index: number): TerminalBlock => {
-  const content = lines.join("\n").trimEnd();
-  const lineCount = lines.filter((line) => stripAnsi(line).trim().length > 0).length || 1;
-  const firstLine = lines.find((line) => stripAnsi(line).trim().length > 0)?.trim() ?? "";
-
-  let title = "Output";
-  let defaultOpen = true;
-  if (kind === "meta") {
-    title = firstLine.startsWith("[error]") ? "Transport / status errors" : "Session / transport log";
-    defaultOpen = false;
-  } else if (kind === "thinking") {
-    title = "Reasoning / work log";
-    defaultOpen = false;
-  } else if (firstLine.startsWith("OpenAI Codex")) {
-    title = "CLI banner";
-  }
-
-  return {
-    id: `${kind}-${index}`,
-    kind,
-    title,
-    content,
-    lineCount,
-    defaultOpen,
-  };
-};
 
 export default function App() {
   const [host, setHost] = useState(() => {
@@ -188,7 +41,6 @@ export default function App() {
   const [modelInput, setModelInput] = useState("gpt-5.4");
   const [promptInput, setPromptInput] = useState("Say hello to Codex");
   const [backendChoice, setBackendChoice] = useState<"mock" | "cli">("cli");
-  const [streamOutput, setStreamOutput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamHistory, setStreamHistory] = useState<Array<{
     streamId: string;
@@ -211,12 +63,16 @@ export default function App() {
   const [terminalView, setTerminalView] = useState<"compact" | "split" | "raw">("compact");
 
   const wsRef = useMemo(() => ({ ws: null as WebSocket | null }), []);
-  const terminalHostRef = useRef<HTMLDivElement | null>(null);
-  const terminalRef = useRef<Terminal | null>(null);
-  const fitAddonRef = useRef<FitAddon | null>(null);
-  const transcriptRef = useRef("");
   const isStreamingRef = useRef(false);
   const terminalStatusRef = useRef("ready");
+  const {
+    terminalHostRef,
+    streamOutput,
+    appendTerminal,
+    resetTerminal,
+    clearTerminalView: resetTerminalView,
+    fitTerminal,
+  } = useXtermTerminal();
 
   useEffect(() => {
     isStreamingRef.current = isStreaming;
@@ -226,91 +82,7 @@ export default function App() {
     terminalStatusRef.current = terminalStatus;
   }, [terminalStatus]);
 
-  const appendTerminal = useCallback((text: string) => {
-    transcriptRef.current += text;
-    setStreamOutput(transcriptRef.current);
-    terminalRef.current?.write(text);
-  }, []);
-
-  const resetTerminal = useCallback(() => {
-    transcriptRef.current = "";
-    setStreamOutput("");
-    if (terminalRef.current) {
-      terminalRef.current.reset();
-      terminalRef.current.clear();
-    }
-  }, []);
-
-  const compactBlocks = useMemo(() => {
-    const normalized = streamOutput.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
-    if (!normalized) {
-      return [] as TerminalBlock[];
-    }
-
-    const lines = normalized.split("\n");
-    const blocks: TerminalBlock[] = [];
-    let currentKind: TerminalBlockKind | null = null;
-    let currentLines: string[] = [];
-
-    const flush = () => {
-      if (currentKind && currentLines.length > 0) {
-        blocks.push(buildTerminalBlock(currentKind, currentLines, blocks.length));
-      }
-      currentKind = null;
-      currentLines = [];
-    };
-
-    for (const line of lines) {
-      const nextKind = getBlockKind(line, currentKind);
-      if (currentKind && nextKind !== currentKind && line.trim()) {
-        flush();
-      }
-      currentKind = nextKind;
-      currentLines.push(line);
-    }
-
-    flush();
-    return blocks;
-  }, [streamOutput]);
-
-  useEffect(() => {
-    if (!terminalHostRef.current) return;
-
-    const fitAddon = new FitAddon();
-    const term = new Terminal({
-      convertEol: true,
-      disableStdin: true,
-      cursorBlink: true,
-      fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-      fontSize: 13,
-      lineHeight: 1.35,
-      theme: {
-        background: "#0b1220",
-        foreground: "#dbe7ff",
-        cursor: "#93c5fd",
-        selectionBackground: "rgba(147, 197, 253, 0.28)",
-      },
-    });
-
-    term.loadAddon(fitAddon);
-    term.open(terminalHostRef.current);
-    fitAddon.fit();
-    term.writeln("Codex terminal ready.");
-    term.writeln("");
-
-    terminalRef.current = term;
-    fitAddonRef.current = fitAddon;
-
-    const handleResize = () => fitAddon.fit();
-    window.addEventListener("resize", handleResize);
-
-    return () => {
-      window.removeEventListener("resize", handleResize);
-      term.dispose();
-      terminalRef.current = null;
-      fitAddonRef.current = null;
-    };
-  }, []);
+  const compactBlocks = useMemo(() => buildTerminalBlocks(streamOutput), [streamOutput]);
 
   const refreshAccessToken = async (currentToken: string): Promise<string | null> => {
     if (!refreshToken || !deviceId) {
@@ -531,7 +303,7 @@ export default function App() {
           const msg = JSON.parse(ev.data) as { type: string; text?: string; message?: string };
           if (msg.type === "chunk") {
             appendTerminal(msg.text ?? "");
-            fitAddonRef.current?.fit();
+            fitTerminal();
           } else if (msg.type === "done") {
             appendTerminal("\r\n\x1b[32m[done]\x1b[0m\r\n");
             setTerminalStatus("done");
@@ -574,6 +346,7 @@ export default function App() {
     api,
     appendTerminal,
     backendChoice,
+    fitTerminal,
     isStreaming,
     modelInput,
     resetTerminal,
@@ -608,9 +381,7 @@ export default function App() {
   };
 
   const clearTerminalView = () => {
-    resetTerminal();
-    terminalRef.current?.writeln("Codex terminal cleared.");
-    terminalRef.current?.writeln("");
+    resetTerminalView();
     setTerminalStatus("ready");
   };
 
@@ -723,93 +494,28 @@ export default function App() {
         <p className="mono">結果: {commandResult}</p>
       </section>
 
-      <section className="card">
-        <h2>Codex Terminal</h2>
-        <p className="mono">status: {terminalStatus}</p>
-        <div className="row terminal-view-toggle">
-          <button className={terminalView === "compact" ? "is-active" : ""} onClick={() => setTerminalView("compact")}>
-            Compact
-          </button>
-          <button className={terminalView === "split" ? "is-active" : ""} onClick={() => setTerminalView("split")}>
-            Split
-          </button>
-          <button className={terminalView === "raw" ? "is-active" : ""} onClick={() => setTerminalView("raw")}>
-            Raw Terminal
-          </button>
-        </div>
-        {(terminalView === "compact" || terminalView === "split") && (
-          <div className="terminal-compact">
-            {compactBlocks.length === 0 ? (
-              <p className="mono terminal-empty">No transcript yet.</p>
-            ) : (
-              compactBlocks.map((block) => (
-                <details key={block.id} className={`terminal-block terminal-block-${block.kind}`} open={block.defaultOpen}>
-                  <summary>
-                    <span>{block.title}</span>
-                    <span className="mono terminal-block-meta">{block.lineCount} lines</span>
-                  </summary>
-                  <pre className="mono terminal-block-content">
-                    {block.content.split("\n").map((line, lineIndex) => (
-                      <span key={`${block.id}-${lineIndex}`} className="terminal-block-line">
-                        {parseAnsiLine(line).map((span, spanIndex) => (
-                          <span key={`${block.id}-${lineIndex}-${spanIndex}`} className={span.className}>
-                            {span.text}
-                          </span>
-                        ))}
-                        {lineIndex < block.content.split("\n").length - 1 ? "\n" : ""}
-                      </span>
-                    ))}
-                  </pre>
-                </details>
-              ))
-            )}
-          </div>
-        )}
-        {(terminalView === "raw" || terminalView === "split") && (
-          <div className="terminal-frame">
-            <div className="terminal-chrome">
-              <div className="terminal-lights" aria-hidden="true">
-                <span className="terminal-light terminal-light-close" />
-                <span className="terminal-light terminal-light-minimize" />
-                <span className="terminal-light terminal-light-expand" />
-              </div>
-              <div className="terminal-title mono">codex / interactive stream</div>
-              <div className="terminal-shell mono">zsh</div>
-            </div>
-            <div ref={terminalHostRef} className="terminal-host" />
-          </div>
-        )}
-        <div className="row terminal-actions">
-          <input
-            style={{ flex: 1 }}
-            value={chatInput}
-            onChange={(e) => setChatInput(e.target.value)}
-            placeholder="Send a prompt to Codex..."
-          />
-          <button onClick={sendChatMessage} disabled={!token || !chatInput.trim() || isStreaming}>Send</button>
-          <button onClick={cancelCodexStream} disabled={!isStreaming}>Cancel</button>
-          <button onClick={clearTerminalView}>Clear</button>
-        </div>
-        <label>
-          Model
-          <input value={modelInput} onChange={(e) => setModelInput(e.target.value)} />
-        </label>
-        <label>
-          Backend
-          <select value={backendChoice} onChange={(e) => setBackendChoice(e.target.value as "mock" | "cli")}>
-            <option value="cli">cli</option>
-            <option value="mock">mock</option>
-          </select>
-        </label>
-        <label>
-          Prompt
-          <input value={promptInput} onChange={(e) => setPromptInput(e.target.value)} />
-        </label>
-        <div className="row">
-          <button onClick={startCodexStream} disabled={isStreaming}>Run Prompt</button>
-          <button onClick={fetchStreamHistory}>履歴を取得</button>
-        </div>
-      </section>
+      <CodexTerminalSection
+        terminalStatus={terminalStatus}
+        terminalView={terminalView}
+        setTerminalView={setTerminalView}
+        compactBlocks={compactBlocks}
+        terminalHostRef={terminalHostRef}
+        chatInput={chatInput}
+        setChatInput={setChatInput}
+        token={token}
+        isStreaming={isStreaming}
+        sendChatMessage={sendChatMessage}
+        cancelCodexStream={cancelCodexStream}
+        clearTerminalView={clearTerminalView}
+        modelInput={modelInput}
+        setModelInput={setModelInput}
+        backendChoice={backendChoice}
+        setBackendChoice={setBackendChoice}
+        promptInput={promptInput}
+        setPromptInput={setPromptInput}
+        startCodexStream={startCodexStream}
+        fetchStreamHistory={fetchStreamHistory}
+      />
 
       <section className="card">
         <h2>ログ</h2>
