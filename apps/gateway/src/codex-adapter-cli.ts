@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import EventEmitter from "node:events";
 import { spawn } from "node:child_process";
 import type { CodexAdapter, ExecutionRequest } from "./codex-adapter.js";
+import { getWorkspaceRoot } from "./file-browser.js";
 
 const parseArgs = (raw?: string): string[] => {
   if (!raw) return [];
@@ -49,6 +50,7 @@ export class CliCodexAdapter implements CodexAdapter {
 
       const child = spawn(command, finalArgs, {
         stdio: [stdinSpec, "pipe", "pipe"],
+        cwd: getWorkspaceRoot(),
         env: {
           ...process.env,
           TERM: process.env.TERM ?? "xterm-256color",
@@ -123,6 +125,7 @@ export class CliCodexAdapter implements CodexAdapter {
 
     const child = spawn(command, finalArgs, {
       stdio: [stdinSpec, "pipe", "pipe"],
+      cwd: getWorkspaceRoot(),
       env: {
         ...process.env,
         TERM: process.env.TERM ?? "xterm-256color",

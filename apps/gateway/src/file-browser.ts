@@ -39,6 +39,10 @@ export type FileEntry = {
   modifiedAt: string;
 };
 
+const configuredWorkspaceRoot = process.env.CODEX_WORKDIR?.trim()
+  ? resolve(process.env.CODEX_WORKDIR)
+  : resolve(process.cwd());
+
 const normalizeRelativePath = (rawPath?: string) => {
   const trimmed = (rawPath ?? "").trim();
   if (!trimmed || trimmed === "." || trimmed === "/") {
@@ -47,7 +51,7 @@ const normalizeRelativePath = (rawPath?: string) => {
   return trimmed.replace(/^\/+/, "").replace(/\\/g, "/");
 };
 
-export const getWorkspaceRoot = () => resolve(process.cwd());
+export const getWorkspaceRoot = () => configuredWorkspaceRoot;
 
 export const resolveWorkspacePath = (rawPath?: string) => {
   const root = getWorkspaceRoot();

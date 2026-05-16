@@ -68,6 +68,7 @@ Gatewayは `mock` と `cli` の2種類のCodexアダプタを切り替えられ�
 
 利用可能な環境変数:
 - `CODEX_BACKEND`: `mock` または `cli`
+- `CODEX_WORKDIR`: Codex実行とPWAファイルブラウザの基準ディレクトリ（既定: gateway起動時のカレントディレクトリ）
 - `CODEX_CLI_COMMAND`: 実行するCLIコマンド名（既定: `codex`）
 - `CODEX_CLI_ARGS`: CLI引数（JSON配列または空白区切り文字列）
 - `CODEX_CLI_PROMPT_MODE`: `stdin`（既定）または `arg`
@@ -86,6 +87,13 @@ npm run dev:gateway
 CODEX_BACKEND=cli \
 CODEX_CLI_COMMAND=codex \
 CODEX_CLI_PROMPT_MODE=arg \
+npm run dev:gateway
+```
+
+例: Codex の作業ディレクトリをリポジトリrootに固定する
+```bash
+CODEX_BACKEND=cli \
+CODEX_WORKDIR=/Users/kouta/Developments/Codex-Interface \
 npm run dev:gateway
 ```
 
