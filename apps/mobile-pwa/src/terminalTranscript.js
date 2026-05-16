@@ -95,7 +95,8 @@ const getBlockKind = (line, currentKind) => {
     return "output";
 };
 const buildTerminalBlock = (kind, lines, index) => {
-    const content = lines.join("\n").trimEnd();
+    const rawContent = lines.join("\n").trimEnd();
+    const content = kind === "output" ? extractDisplayOutput(rawContent) : rawContent;
     const lineCount = lines.filter((line) => stripAnsi(line).trim().length > 0).length || 1;
     const firstLine = lines.find((line) => stripAnsi(line).trim().length > 0)?.trim() ?? "";
     let title = "Output";
@@ -116,7 +117,7 @@ const buildTerminalBlock = (kind, lines, index) => {
         kind,
         title,
         content,
-        lineCount,
+        lineCount: content.split("\n").filter((line) => line.trim().length > 0).length || lineCount,
         defaultOpen,
     };
 };
@@ -146,4 +147,27 @@ export const buildTerminalBlocks = (streamOutput) => {
     }
     flush();
     return blocks;
+};
+export const extractDisplayOutput = (rawOutput) => {
+    const normalized = stripAnsi(rawOutput).replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
+    if (!normalized) {
+        return "";
+    }
+    const lines = normalized.split("\n");
+    const tokensUsedIndex = lines.findIndex((line) => line.trim() === "tokens used");
+    const codexLineIndex = lines.findIndex((line) => ROLE_LINE_RE.test(line.trim()) && line.trim().toLowerCase() === "codex");
+    if (codexLineIndex >= 0) {
+        const answerEndIndex = tokensUsedIndex > codexLineIndex ? tokensUsedIndex : lines.length;
+        const assistantBody = lines.slice(codexLineIndex + 1, answerEndIndex).join("\n").trim();
+        if (assistantBody) {
+            return assistantBody;
+        }
+    }
+    if (tokensUsedIndex >= 0) {
+        const tailStart = lines.findIndex((line, index) => index > tokensUsedIndex + 1 && line.trim().length > 0);
+        if (tailStart >= 0) {
+            return lines.slice(tailStart).join("\n").trim();
+        }
+    }
+    return normalized;
 };
