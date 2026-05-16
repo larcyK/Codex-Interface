@@ -2,8 +2,9 @@ const ANSI_ESCAPE_RE = /\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g;
 const ANSI_SGR_RE = /\x1b\[([0-9;]*)m/g;
 const META_LINE_RE = /^\[(local|ws open|ws closed|done|error|raw|connect failed|cancel requested|ws error)\]/i;
 const HEADER_LINE_RE = /^(OpenAI Codex|Model:|Directory:|Safety:|Session:|Permission mode:)/i;
-const SESSION_INFO_LINE_RE = /^(provider:|approval:|sandbox:|reasoning effort:|reasoning summaries:|session id:)/i;
-const ROLE_LINE_RE = /^(user|assistant|codex)$/i;
+const SESSION_INFO_LINE_RE = /^(workdir:|model:|provider:|approval:|sandbox:|reasoning effort:|reasoning summaries:|session id:)/i;
+const ROLE_LINE_RE = /^(user|assistant|codex|exec)$/i;
+const EXEC_STATUS_LINE_RE = /^(succeeded in|failed in|running in)/i;
 const THINKING_LINE_RE = /^(thinking|reasoning|analysis|plan|searching|reading|inspecting|editing|running|patching|diffing|tool\b)/i;
 const ANSI_FG_CLASS = {
     30: "ansi-fg-black",
@@ -75,21 +76,30 @@ export const parseAnsiLine = (line) => {
     }
     return spans;
 };
-const getBlockKind = (line, currentKind) => {
+const getBlockKind = (line, currentKind, hasConversationStarted) => {
     const trimmed = stripAnsi(line).trim();
     if (!trimmed) {
         return currentKind ?? "meta";
     }
-    if (META_LINE_RE.test(trimmed) || HEADER_LINE_RE.test(trimmed) || SESSION_INFO_LINE_RE.test(trimmed)) {
+    if (META_LINE_RE.test(trimmed)) {
+        return "meta";
+    }
+    if (!hasConversationStarted && (HEADER_LINE_RE.test(trimmed) || SESSION_INFO_LINE_RE.test(trimmed) || trimmed === "--------")) {
         return "meta";
     }
     if (ROLE_LINE_RE.test(trimmed)) {
-        return "output";
+        return trimmed.toLowerCase() === "exec" ? "thinking" : "output";
+    }
+    if (currentKind === "thinking" && (EXEC_STATUS_LINE_RE.test(trimmed) || /^\/.+/.test(trimmed))) {
+        return "thinking";
     }
     if (THINKING_LINE_RE.test(trimmed)) {
         return "thinking";
     }
-    if (currentKind === "thinking" && !ROLE_LINE_RE.test(trimmed) && !SESSION_INFO_LINE_RE.test(trimmed) && !META_LINE_RE.test(trimmed)) {
+    if (currentKind === "thinking" &&
+        !ROLE_LINE_RE.test(trimmed) &&
+        !META_LINE_RE.test(trimmed) &&
+        !(!hasConversationStarted && SESSION_INFO_LINE_RE.test(trimmed))) {
         return "thinking";
     }
     return "output";
@@ -129,6 +139,7 @@ export const buildTerminalBlocks = (streamOutput) => {
     const blocks = [];
     let currentKind = null;
     let currentLines = [];
+    let hasConversationStarted = false;
     const flush = () => {
         if (currentKind && currentLines.length > 0) {
             blocks.push(buildTerminalBlock(currentKind, currentLines, blocks.length));
@@ -137,7 +148,11 @@ export const buildTerminalBlocks = (streamOutput) => {
         currentLines = [];
     };
     for (const line of lines) {
-        const nextKind = getBlockKind(line, currentKind);
+        const stripped = stripAnsi(line).trim().toLowerCase();
+        if (ROLE_LINE_RE.test(stripped) && stripped !== "exec") {
+            hasConversationStarted = true;
+        }
+        const nextKind = getBlockKind(line, currentKind, hasConversationStarted);
         if (currentKind && nextKind !== currentKind && line.trim()) {
             flush();
         }
