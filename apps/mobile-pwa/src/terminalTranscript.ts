@@ -121,8 +121,7 @@ const getBlockKind = (line: string, currentKind: TerminalBlockKind | null): Term
 };
 
 const buildTerminalBlock = (kind: TerminalBlockKind, lines: string[], index: number): TerminalBlock => {
-  const rawContent = lines.join("\n").trimEnd();
-  const content = kind === "output" ? extractDisplayOutput(rawContent) : rawContent;
+  const content = lines.join("\n").trimEnd();
   const lineCount = lines.filter((line) => stripAnsi(line).trim().length > 0).length || 1;
   const firstLine = lines.find((line) => stripAnsi(line).trim().length > 0)?.trim() ?? "";
 
@@ -143,7 +142,7 @@ const buildTerminalBlock = (kind: TerminalBlockKind, lines: string[], index: num
     kind,
     title,
     content,
-    lineCount: content.split("\n").filter((line) => line.trim().length > 0).length || lineCount,
+    lineCount,
     defaultOpen,
   };
 };
