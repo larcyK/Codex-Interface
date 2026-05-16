@@ -27,6 +27,8 @@ const API_PREFIX = "/api/v1";
 const ANSI_ESCAPE_RE = /\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g;
 const META_LINE_RE = /^\[(local|ws open|ws closed|done|error|raw|connect failed|cancel requested|ws error)\]/i;
 const HEADER_LINE_RE = /^(OpenAI Codex|Model:|Directory:|Safety:|Session:|Permission mode:)/i;
+const SESSION_INFO_LINE_RE = /^(provider:|approval:|sandbox:|reasoning effort:|reasoning summaries:|session id:)/i;
+const ROLE_LINE_RE = /^(user|assistant|codex)$/i;
 const THINKING_LINE_RE = /^(thinking|reasoning|analysis|plan|searching|reading|inspecting|editing|running|patching|diffing|tool\b)/i;
 
 const stripAnsi = (text: string) => text.replace(ANSI_ESCAPE_RE, "");
@@ -36,13 +38,16 @@ const getBlockKind = (line: string, currentKind: TerminalBlockKind | null): Term
   if (!trimmed) {
     return currentKind ?? "meta";
   }
-  if (META_LINE_RE.test(trimmed) || HEADER_LINE_RE.test(trimmed)) {
+  if (META_LINE_RE.test(trimmed) || HEADER_LINE_RE.test(trimmed) || SESSION_INFO_LINE_RE.test(trimmed)) {
     return "meta";
+  }
+  if (ROLE_LINE_RE.test(trimmed)) {
+    return "output";
   }
   if (THINKING_LINE_RE.test(trimmed)) {
     return "thinking";
   }
-  if (currentKind === "thinking" && !META_LINE_RE.test(trimmed)) {
+  if (currentKind === "thinking" && !ROLE_LINE_RE.test(trimmed) && !SESSION_INFO_LINE_RE.test(trimmed) && !META_LINE_RE.test(trimmed)) {
     return "thinking";
   }
   return "output";
